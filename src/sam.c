@@ -46,6 +46,7 @@ struct sam_synth {
     double bigvgan_phase; /* continuous phase for the harmonic/residual vocoder */
     double bigvgan_gain;  /* smoothed peak-control gain across frames and segments */
     double spectral_phase[64];
+    double spectral_amplitude[64];
     unsigned char spectral_phase_valid[64];
     double svib_phase;   /* singing vibrato phase */
     /* vowel hold (singing): output samples -> source samples, piecewise linear */
@@ -690,10 +691,10 @@ static void bigvgan_render_frame(sam_synth *s, const float *a, float *x, int n, 
 static void spectral_render_frame(sam_synth *s, const float *a, float *x, int n, float gain, int voiced)
 {
     const double two_pi = 6.283185307179586;
-    double amplitude[64], target_phase[64], phase = s->bigvgan_phase;
+    double amplitude[64], target_phase[64], start_amplitude[64], phase = s->bigvgan_phase;
     double sr = (double)(float)(s->p.out_rate > 0 ? s->p.out_rate : s->v->rate);
     double phase_smoothing = 1.0 - exp(-(double)n / (sr * 0.012));
-    int harmonics = (int)((double)n * 0.4), i, k;
+    int harmonics = (int)((double)n * 0.32), i, k;
     if (harmonics > 64) harmonics = 64;
     if (harmonics < 1) {
         memset(x, 0, sizeof(float) * (size_t)n);
@@ -734,11 +735,17 @@ static void spectral_render_frame(sam_synth *s, const float *a, float *x, int n,
             double fade = (double)(harmonics - k) / 8.0;
             amplitude[k - 1] *= 0.5 - 0.5 * cos(3.141592653589793 * fade);
         }
+        start_amplitude[k - 1] = s->spectral_amplitude[k - 1];
+        s->spectral_amplitude[k - 1] = amplitude[k - 1];
     }
     for (i = 0; i < n; i++) {
         double sample = 0.0;
-        for (k = 1; k <= harmonics; k++)
-            sample += amplitude[k - 1] * sin(two_pi * k * phase + s->spectral_phase[k - 1]);
+        double frame_mix = (double)(i + 1) / n;
+        for (k = 1; k <= harmonics; k++) {
+            double amp = start_amplitude[k - 1] +
+                         frame_mix * (amplitude[k - 1] - start_amplitude[k - 1]);
+            sample += amp * sin(two_pi * k * phase + s->spectral_phase[k - 1]);
+        }
         x[i] = (float)sample;
         phase += 1.0 / n;
         if (phase >= 1.0) phase -= 1.0;
