@@ -585,27 +585,37 @@ static void lpc_filter(sam_synth *s, const float *a, float *x, int n, float gain
     }
 }
 
-/* Replace a decoded voiced residual with a differentiated Rosenberg glottal pulse. */
+static double rosenberg_pulse(int i, int n)
+{
+    const double open = 0.62, phase = (double)i / n;
+    if (phase < open)
+        return 0.5 * 3.141592653589793 / open * sin(3.141592653589793 * phase / open);
+    return -0.5 * 3.141592653589793 / (1.0 - open) *
+           sin(3.141592653589793 * (phase - open) / (1.0 - open));
+}
+
+/* Blend a glottal pulse with the decoded residual to preserve its high-frequency detail. */
 static void pulse_excitation(float *x, int n)
 {
-    const double open = 0.62;
-    double source_energy = 0.0, pulse_energy = 0.0;
+    const double pulse_mix = 0.35;
+    double source_energy = 0.0, pulse_energy = 0.0, mixed_energy = 0.0;
     int i;
     for (i = 0; i < n; i++) source_energy += (double)x[i] * x[i];
     for (i = 0; i < n; i++) {
-        double phase = (double)i / n;
-        double pulse;
-        if (phase < open)
-            pulse = 0.5 * 3.141592653589793 / open * sin(3.141592653589793 * phase / open);
-        else
-            pulse = -0.5 * 3.141592653589793 / (1.0 - open) *
-                    sin(3.141592653589793 * (phase - open) / (1.0 - open));
-        x[i] = (float)pulse;
+        double pulse = rosenberg_pulse(i, n);
         pulse_energy += pulse * pulse;
     }
     if (source_energy > 0.0 && pulse_energy > 0.0) {
-        double scale = sqrt(source_energy / pulse_energy);
-        for (i = 0; i < n; i++) x[i] = (float)(x[i] * scale);
+        double pulse_scale = sqrt(source_energy / pulse_energy);
+        for (i = 0; i < n; i++) {
+            double mixed = (1.0 - pulse_mix) * x[i] + pulse_mix * pulse_scale * rosenberg_pulse(i, n);
+            x[i] = (float)mixed;
+            mixed_energy += mixed * mixed;
+        }
+        if (mixed_energy > 0.0) {
+            double output_scale = sqrt(source_energy / mixed_energy);
+            for (i = 0; i < n; i++) x[i] = (float)(x[i] * output_scale);
+        }
     } else {
         memset(x, 0, sizeof(float) * (size_t)n);
     }
