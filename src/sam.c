@@ -49,6 +49,8 @@ struct sam_synth {
     double spectral_f0;
     int spectral_f0_valid;
     int spectral_harmonics;
+    int spectral_last_voiced;
+    int spectral_voicing_valid;
     double spectral_amplitude[64];
     double spectral_noise_phase[128];
     double spectral_noise_frequency[128];
@@ -785,6 +787,21 @@ static unsigned spectral_noise_random(sam_synth *s)
     return s->spectral_noise_state;
 }
 
+static void spectral_transition_fade(float *x, int n, double sr, int fade_in, int fade_out)
+{
+    int fade_samples = (int)(sr * 0.003), i;
+    if (n < 2 || (!fade_in && !fade_out)) return;
+    if (fade_samples < 2) fade_samples = 2;
+    if (fade_in && fade_out && n >= 4 && fade_samples > n / 2) fade_samples = n / 2;
+    if (fade_samples > n) fade_samples = n;
+    for (i = 0; i < fade_samples; i++) {
+        double phase = (double)i / (fade_samples - 1);
+        double up = 0.5 - 0.5 * cos(3.141592653589793 * phase);
+        if (fade_in) x[i] = (float)(x[i] * up);
+        if (fade_out) x[n - fade_samples + i] = (float)(x[n - fade_samples + i] * (1.0 - up));
+    }
+}
+
 /* Generated broadband consonants, shaped by the frame envelope but not its decoded samples. */
 static void spectral_render_noise(sam_synth *s, const float *a, float *x, int n, float level)
 {
@@ -794,6 +811,10 @@ static void spectral_render_noise(sam_synth *s, const float *a, float *x, int n,
     double sr = (double)(float)(s->p.out_rate > 0 ? s->p.out_rate : s->v->rate);
     int i, k, j;
     if (n <= 0) return;
+    if (s->spectral_f0_valid) {
+        s->bigvgan_phase += (double)n * s->spectral_f0 / sr;
+        s->bigvgan_phase -= floor(s->bigvgan_phase);
+    }
     if (!s->spectral_noise_valid) {
         for (k = 0; k < count; k++) {
             double jitter = ((spectral_noise_random(s) >> 8) / 16777216.0 - 0.5) * (sr / 256.0) * 0.8;
@@ -1001,6 +1022,12 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
     if (g.unit == 0) { /* silence: zero samples, reset the filter */
         int n = (int)(sr * (double)g.dur);
         memset(s->mem, 0, sizeof(float) * (v->order + 1));
+        s->spectral_last_voiced = 0;
+        s->spectral_voicing_valid = 1;
+        if (s->p.vocoder == SAM_VOCODER_SPECTRAL && s->spectral_f0_valid) {
+            s->bigvgan_phase += (double)n * s->spectral_f0 / sr;
+            s->bigvgan_phase -= floor(s->bigvgan_phase);
+        }
         out = scratch(s, (size_t)n + 1);
         if (!out) return -1;
         for (i = 0; i < n; i++) out[i] = 0.0f;
@@ -1127,10 +1154,20 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
             smooth_peak_control(&s->bigvgan_gain, dst, n,
                                 (double)(float)(s->p.out_rate > 0 ? s->p.out_rate : v->rate), 0.08);
         } else if (s->p.vocoder == SAM_VOCODER_SPECTRAL) {
-            if (u.periods[f] > 0.0f)
+            int voiced = u.periods[f] > 0.0f;
+            int previous_voiced = e > 0 ? u.periods[frame[e - 1]] > 0.0f :
+                                          s->spectral_last_voiced;
+            int fade_in = (s->spectral_voicing_valid || e > 0) && (previous_voiced != voiced);
+            int fade_out = e + 1 < n_e && ((u.periods[frame[e + 1]] > 0.0f) != voiced);
+            if (voiced)
                 spectral_render_frame(s, a, dst, n, s->p.gain, 1);
             else
                 spectral_render_noise(s, a, dst, n, s->p.gain * u.gains[f] * 0.08f);
+            spectral_transition_fade(dst, n,
+                                     (double)(float)(s->p.out_rate > 0 ? s->p.out_rate : v->rate),
+                                     fade_in, fade_out);
+            s->spectral_last_voiced = voiced;
+            s->spectral_voicing_valid = 1;
             smooth_peak_control(&s->spectral_gain, dst, n,
                                 (double)(float)(s->p.out_rate > 0 ? s->p.out_rate : v->rate), 0.02);
         } else {
