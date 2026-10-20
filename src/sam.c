@@ -712,7 +712,7 @@ static void spectral_render_frame(sam_synth *s, const float *a, float *x, int n,
     }
     target_f0 = s->spectral_f0;
     max_f0 = start_f0 > target_f0 ? start_f0 : target_f0;
-    harmonics = (int)(sr * 0.4 / max_f0);
+    harmonics = (int)(sr * 0.48 / max_f0);
     if (harmonics > 64) harmonics = 64;
     render_harmonics = harmonics > s->spectral_harmonics ? harmonics : s->spectral_harmonics;
     if (render_harmonics > 64) render_harmonics = 64;
@@ -746,7 +746,7 @@ static void spectral_render_frame(sam_synth *s, const float *a, float *x, int n,
         }
         {
             double frequency = k * max_f0;
-            const double fade_start = sr * 0.24, fade_end = sr * 0.4;
+            const double fade_start = sr * 0.36, fade_end = sr * 0.48;
             if (frequency > fade_start) {
                 double fade = (fade_end - frequency) / (fade_end - fade_start);
                 if (fade < 0.0) fade = 0.0;
