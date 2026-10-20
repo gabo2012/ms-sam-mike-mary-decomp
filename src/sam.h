@@ -25,7 +25,8 @@ typedef struct sam_synth sam_synth;
 typedef enum {
     SAM_VOCODER_RESIDUAL = 0, /* decoded voice residuals (original engine) */
     SAM_VOCODER_PULSE = 1,    /* generated glottal pulses through the same LPC filters */
-    SAM_VOCODER_BIGVGAN = 2   /* lightweight harmonic/residual source; not the neural BigVGAN model */
+    SAM_VOCODER_BIGVGAN = 2,  /* lightweight harmonic/residual source; not the neural BigVGAN model */
+    SAM_VOCODER_SPECTRAL = 3  /* additive partial synthesis; no time-domain LPC filtering */
 } sam_vocoder;
 
 /* One back-end segment, as produced by the engine's front end (the "segment record"). */

@@ -3,7 +3,7 @@
  * usage: sam_say [options] "text" out.wav      ("@file.txt" speaks a UTF-8 text file)
  *   --data DIR      folder containing Sam.spd, LTTS1033.LXA and r1033tts.LXA
  *   --pitch x --speed x --gain x --vibrato depth rate --no-reverse   (see sam.h)
- *   --vocoder residual|pulse|bigvgan   select the excitation engine
+ *   --vocoder residual|pulse|bigvgan|spectral   select the excitation engine
  *   --reverse-units   play every sound unit backwards      --rate HZ   run the vocoder at another rate
  *   --sing            the text is a score: "twin-kle C4 1 C4 1" per line, "- 1" rest, "tempo 100"
  *     --no-smooth  --sing-vibrato CENTS HZ  --transpose SEMITONES
@@ -85,8 +85,9 @@ int main(int argc, char **argv)
             if (!strcmp(name, "residual")) p.vocoder = SAM_VOCODER_RESIDUAL;
             else if (!strcmp(name, "pulse")) p.vocoder = SAM_VOCODER_PULSE;
             else if (!strcmp(name, "bigvgan")) p.vocoder = SAM_VOCODER_BIGVGAN;
+            else if (!strcmp(name, "spectral")) p.vocoder = SAM_VOCODER_SPECTRAL;
             else {
-                fprintf(stderr, "sam_say: unknown vocoder %s (residual, pulse or bigvgan)\n", name);
+                fprintf(stderr, "sam_say: unknown vocoder %s (residual, pulse, bigvgan or spectral)\n", name);
                 return 1;
             }
         }
@@ -138,7 +139,7 @@ int main(int argc, char **argv)
         if ((unsigned char)text[0] == 0xef && (unsigned char)text[1] == 0xbb && (unsigned char)text[2] == 0xbf) text += 3;
     }
     if (!text || !out) {
-        fprintf(stderr, "usage: sam_say [--data DIR] [--vocoder residual|pulse|bigvgan] [--pitch x] [--speed x] [--gain x] [--vibrato d r] \"text\" out.wav\n");
+        fprintf(stderr, "usage: sam_say [--data DIR] [--vocoder residual|pulse|bigvgan|spectral] [--pitch x] [--speed x] [--gain x] [--vibrato d r] \"text\" out.wav\n");
         return 1;
     }
 #ifdef SAM_EMBEDDED

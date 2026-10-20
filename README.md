@@ -73,22 +73,27 @@ build\x64\sam_say.exe --data data\voice --voice Mary @story.txt out.wav         
 build\x64\sam_say.exe --data data\voice --voice Mike --effect hall "Mike in Hall." out.wav
 build\x64\sam_say.exe --data data\voice --voice Mary --vocoder pulse "Mary in a new voice." out.wav
 build\x64\sam_say.exe --data data\voice --voice Sam --vocoder bigvgan "Sam with harmonic excitation." out.wav
+build\x64\sam_say.exe --data data\voice --voice Sam --vocoder spectral "Sam with additive synthesis." out.wav
 ```
 
 ### Swappable vocoder
 
 Every `.spd` voice can use `--vocoder residual` (the default, preserving the original
 residual-excitation LPC synthesis), `--vocoder pulse` (generated glottal pulses mixed with decoded
-voiced residuals), or `--vocoder bigvgan` (a lightweight DSP approximation using a phase-continuous,
-band-limited harmonic source). All three use
-the same voice file, unit selection, LPC filters, pitch and duration contours. The `bigvgan` option
+voiced residuals), `--vocoder bigvgan` (a lightweight DSP approximation using a phase-continuous,
+band-limited harmonic source), or `--vocoder spectral` (additive harmonic/noise synthesis from
+measured residual partials). The spectral mode uses independently weighted sinusoids for voiced
+frames and measured noise phases for unvoiced frames; it does not run an LPC time-domain filter.
+All modes use the same voice file, unit selection, pitch and duration contours. The `bigvgan` option
 directly synthesizes a phase-continuous harmonic waveform shaped by the voice's formant envelope,
 without applying the time-domain LPC filter. A gentle harmonic spectral tilt retains vowel
 brightness, while a conservative Nyquist margin and smooth harmonic taper reduce aliasing. It is
 inspired by neural vocoders' harmonic-rich, anti-aliased
-output, but is not the BigVGAN neural model and does not load its weights. Generated modes reduce
-peaks only when needed; BigVGAN's gain reduction is smoothed across frames and segments to avoid
-audible level jumps. Library users can select `"residual"`, `"pulse"` or `"bigvgan"` with
+output, but is not the BigVGAN neural model and does not load its weights. The spectral mode uses
+the voice's stored LPC envelope as spectral data, but synthesizes by additive sinusoidal resynthesis
+rather than LPC filtering. Generated modes reduce
+peaks only when needed; gain reduction is smoothed across frames and segments to avoid audible level
+jumps. Library users can select `"residual"`, `"pulse"`, `"bigvgan"` or `"spectral"` with
 `sam_tts_set_vocoder()`, or set `sam_params.vocoder` before creating a low-level synthesizer.
 
 ### SAPI 4 voice effects

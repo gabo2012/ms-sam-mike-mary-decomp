@@ -45,6 +45,8 @@ struct sam_synth {
     int chunk_pos;       /* position inside the engine's output chunk */
     double bigvgan_phase; /* continuous phase for the harmonic/residual vocoder */
     double bigvgan_gain;  /* smoothed peak-control gain across frames and segments */
+    double spectral_phase[64];
+    unsigned char spectral_phase_valid[64];
     double svib_phase;   /* singing vibrato phase */
     /* vowel hold (singing): output samples -> source samples, piecewise linear */
     int w_on;
@@ -684,6 +686,66 @@ static void bigvgan_render_frame(sam_synth *s, const float *a, float *x, int n, 
     s->bigvgan_phase = phase;
 }
 
+/* Additive sinusoidal synthesis from measured residual partials and the frame envelope. */
+static void spectral_render_frame(sam_synth *s, const float *a, float *x, int n, float gain, int voiced)
+{
+    const double two_pi = 6.283185307179586;
+    double amplitude[64], target_phase[64], phase = s->bigvgan_phase;
+    double sr = (double)(float)(s->p.out_rate > 0 ? s->p.out_rate : s->v->rate);
+    double phase_smoothing = 1.0 - exp(-(double)n / (sr * 0.012));
+    int harmonics = (int)((double)n * 0.4), i, k;
+    if (harmonics > 64) harmonics = 64;
+    if (harmonics < 1) {
+        memset(x, 0, sizeof(float) * (size_t)n);
+        return;
+    }
+    for (k = 1; k <= harmonics; k++) {
+        double omega = two_pi * k / n;
+        double xr = 0.0, xi = 0.0, ar = 0.0, ai = 0.0;
+        int j;
+        for (i = 0; i < n; i++) {
+            double angle = omega * i;
+            xr += (double)x[i] * cos(angle);
+            xi -= (double)x[i] * sin(angle);
+        }
+        for (j = 0; j <= s->v->order; j++) {
+            ar += (double)a[j] * cos(omega * j);
+            ai -= (double)a[j] * sin(omega * j);
+        }
+        {
+            double denominator = ar * ar + ai * ai;
+            double env = denominator > 1e-18 ? 1.0 / sqrt(denominator) : 0.0;
+            double magnitude = sqrt(xr * xr + xi * xi);
+            amplitude[k - 1] = (2.0 * magnitude / n) * env * gain;
+            target_phase[k - 1] = atan2(xi, xr) - atan2(ai, ar);
+        }
+        if (!voiced) {
+            s->spectral_phase[k - 1] = target_phase[k - 1];
+            s->spectral_phase_valid[k - 1] = 1;
+        } else if (!s->spectral_phase_valid[k - 1]) {
+            s->spectral_phase[k - 1] = target_phase[k - 1];
+            s->spectral_phase_valid[k - 1] = 1;
+        } else {
+            double delta = target_phase[k - 1] - s->spectral_phase[k - 1];
+            delta = atan2(sin(delta), cos(delta));
+            s->spectral_phase[k - 1] += phase_smoothing * delta;
+        }
+        if (harmonics >= 8 && k > harmonics - 8) {
+            double fade = (double)(harmonics - k) / 8.0;
+            amplitude[k - 1] *= 0.5 - 0.5 * cos(3.141592653589793 * fade);
+        }
+    }
+    for (i = 0; i < n; i++) {
+        double sample = 0.0;
+        for (k = 1; k <= harmonics; k++)
+            sample += amplitude[k - 1] * sin(two_pi * k * phase + s->spectral_phase[k - 1]);
+        x[i] = (float)sample;
+        phase += 1.0 / n;
+        if (phase >= 1.0) phase -= 1.0;
+    }
+    s->bigvgan_phase = phase;
+}
+
 static void pulse_peak_control(float *x, size_t n)
 {
     const double peak_limit = 30000.0;
@@ -965,6 +1027,9 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
                 bigvgan_render_frame(s, a, dst, n, s->p.gain);
             else if (s->p.gain != 1.0f)
                 for (i = 0; i < n; i++) dst[i] = (float)((double)dst[i] * s->p.gain);
+            bigvgan_peak_control(s, dst, n);
+        } else if (s->p.vocoder == SAM_VOCODER_SPECTRAL) {
+            spectral_render_frame(s, a, dst, n, s->p.gain, u.periods[f] > 0.0f);
             bigvgan_peak_control(s, dst, n);
         } else {
             lpc_filter(s, a, dst, n, s->p.gain);

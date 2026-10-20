@@ -185,6 +185,15 @@ int main(int argc, char **argv)
                 check(rc == 0 && pulse.samples == full &&
                           memcmp(c.pcm, pulse.pcm, (size_t)full * sizeof *pulse.pcm) != 0,
                       "the BigVGAN-inspired vocoder renders existing voice data");
+                check(sam_tts_set_vocoder(t2, "spectral") == 0,
+                      "the additive spectral vocoder can be selected on an open handle");
+                pulse.samples = 0;
+                memset(pulse.pcm, 0, (size_t)pulse.ncap * sizeof *pulse.pcm);
+                cb.user = &pulse;
+                rc = sam_tts_speak(t2, LONG_TEXT, 0, &cb);
+                check(rc == 0 && pulse.samples == full &&
+                          memcmp(c.pcm, pulse.pcm, (size_t)full * sizeof *pulse.pcm) != 0,
+                      "the additive spectral vocoder renders existing voice data");
             }
             check(sam_tts_set_vocoder(t2, "unknown") == -1,
                   "an unknown vocoder name is rejected");
