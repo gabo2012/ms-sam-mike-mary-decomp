@@ -655,7 +655,7 @@ static void bigvgan_render_frame(sam_synth *s, const float *a, float *x, int n, 
             re += (double)a[j] * cos(omega * j);
             im -= (double)a[j] * sin(omega * j);
         }
-        weight = 1.0 / (sqrt((double)k) * sqrt(re * re + im * im));
+        weight = 1.0 / (pow((double)k, 0.25) * sqrt(re * re + im * im));
         if (harmonics >= 8 && k > harmonics - 8) {
             double fade = (double)(harmonics - k) / 8.0;
             weight *= 0.5 - 0.5 * cos(3.141592653589793 * fade);

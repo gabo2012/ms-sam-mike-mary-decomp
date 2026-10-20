@@ -80,11 +80,12 @@ build\x64\sam_say.exe --data data\voice --voice Sam --vocoder bigvgan "Sam with 
 Every `.spd` voice can use `--vocoder residual` (the default, preserving the original
 residual-excitation LPC synthesis), `--vocoder pulse` (generated glottal pulses mixed with decoded
 voiced residuals), or `--vocoder bigvgan` (a lightweight DSP approximation using a phase-continuous,
-band-limited harmonic source mixed with a small amount of decoded residual detail). All three use
+band-limited harmonic source). All three use
 the same voice file, unit selection, LPC filters, pitch and duration contours. The `bigvgan` option
 directly synthesizes a phase-continuous harmonic waveform shaped by the voice's formant envelope,
-without applying the time-domain LPC filter. It uses a conservative Nyquist margin and smooth
-harmonic taper to reduce aliasing. It is inspired by neural vocoders' harmonic-rich, anti-aliased
+without applying the time-domain LPC filter. A gentle harmonic spectral tilt retains vowel
+brightness, while a conservative Nyquist margin and smooth harmonic taper reduce aliasing. It is
+inspired by neural vocoders' harmonic-rich, anti-aliased
 output, but is not the BigVGAN neural model and does not load its weights. Generated modes reduce
 peaks only when needed; BigVGAN's gain reduction is smoothed across frames and segments to avoid
 audible level jumps. Library users can select `"residual"`, `"pulse"` or `"bigvgan"` with
