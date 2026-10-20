@@ -587,6 +587,28 @@ static void lpc_filter(sam_synth *s, const float *a, float *x, int n, float gain
     }
 }
 
+static float resample_period_bandlimited(const float *src, int src_n, int dst_n, int pos)
+{
+    const double pi = 3.14159265358979323846;
+    const int radius = 8;
+    double x = (double)pos * src_n / dst_n;
+    double cutoff = src_n > dst_n ? (double)dst_n / src_n : 1.0;
+    double sum = 0.0, weight_sum = 0.0;
+    int center = (int)floor(x), k;
+    for (k = center - radius + 1; k <= center + radius; k++) {
+        double distance = x - k, window, argument, weight;
+        int index = k % src_n;
+        if (index < 0) index += src_n;
+        if (fabs(distance) >= radius) continue;
+        window = 0.5 + 0.5 * cos(pi * distance / radius);
+        argument = pi * cutoff * distance;
+        weight = (argument == 0.0 ? 1.0 : sin(argument) / argument) * cutoff * window;
+        sum += src[index] * weight;
+        weight_sum += weight;
+    }
+    return weight_sum != 0.0 ? (float)(sum / weight_sum) : src[center % src_n];
+}
+
 static void bigvgan_inspired_source(sam_synth *s, const float *src, int src_n, float *dst, int n, int period)
 {
     double weights[129], weight_sq = 0.0, source_sq = 0.0, output_sq = 0.0;
@@ -613,10 +635,9 @@ static void bigvgan_inspired_source(sam_synth *s, const float *src, int src_n, f
     step = 2.0 * 3.14159265358979323846 / period;
     for (i = 0; i < n; i++) {
         double harmonic = 0.0, residual;
-        int src_i = ((i % period) * src_n) / period;
         for (h = 1; h <= max_h; h++) harmonic += weights[h] * sin(phase * h);
         harmonic *= normalization;
-        residual = src[src_i] / source_rms;
+        residual = resample_period_bandlimited(src, src_n, period, i % period) / source_rms;
         dst[i] = (float)(0.9 * harmonic + 0.1 * residual);
         phase += step;
         if (phase >= 2.0 * 3.14159265358979323846) phase = fmod(phase, 2.0 * 3.14159265358979323846);
