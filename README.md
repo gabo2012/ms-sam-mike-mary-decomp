@@ -92,10 +92,12 @@ harmonic carrier continues through consonant noise. A short sample-continuous co
 boundaries between acoustic units and silence. It does not run an LPC time-domain filter.
 The separate `--vocoder bigvgan-concat` mode is a lightweight BigVGAN-inspired concatenative
 renderer: it keeps the front end's selected units and frame timing, extracts harmonic magnitudes
-from each selected voiced unit's decoded pulse spectrum, and synthesizes a phase-continuous,
-band-limited harmonic source. Unvoiced portions use their selected unit excitation directly. It
-does not use LPC coefficients or the LPC filter, and normalizes each rendered unit to a common RMS
-target before peak control. It is DSP, not the BigVGAN neural model, and uses no pretrained weights.
+and phase from each selected voiced unit's decoded pulse spectrum, shapes those partials with broad
+formants estimated directly from the unit's line-spectral frequencies, and synthesizes a
+phase-continuous, band-limited harmonic source. Unvoiced portions use their selected unit excitation
+directly. It does not use LPC coefficients or the LPC filter, and normalizes each rendered speech
+unit to a common RMS target before peak control. It is DSP, not the BigVGAN neural model, and uses no
+pretrained weights.
 All modes use the same voice file, unit selection, pitch and duration contours. The `bigvgan` option
 directly synthesizes a phase-continuous harmonic waveform shaped by the voice's formant envelope,
 without applying the time-domain LPC filter. A gentle harmonic spectral tilt retains vowel

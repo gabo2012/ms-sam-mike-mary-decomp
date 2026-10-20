@@ -48,6 +48,8 @@ struct sam_synth {
     double concat_peak_gain;
     double concat_f0;
     int concat_f0_valid;
+    double concat_phase_offset[64];
+    unsigned char concat_phase_valid[64];
     double spectral_gain; /* independent peak-control state for the additive vocoder */
     double spectral_f0;
     int spectral_f0_valid;
@@ -704,15 +706,42 @@ static void bigvgan_render_frame(sam_synth *s, const float *a, float *x, int n, 
     s->bigvgan_phase = phase;
 }
 
-/* Harmonic resynthesis from each selected unit's decoded pulse spectrum, without LPC filtering. */
-static void concat_harmonic_render(sam_synth *s, float *x, int n, double sr, float gain)
+/* Shape each unit's pulse spectrum with broad formants estimated from its sorted LSF pairs. */
+static void concat_harmonic_render(sam_synth *s, const float *lsf, float *x, int n, int order,
+                                   double sr, float gain)
 {
     const double two_pi = 6.283185307179586;
-    double weights[64], source_energy = 0.0, harmonic_energy = 0.0;
+    double weights[64], phase_target[64], phase_start[64];
+    double formant_hz[16], formant_width[16], formant_strength[16];
+    double source_energy = 0.0, harmonic_energy = 0.0;
     double phase = s->bigvgan_phase;
-    int harmonics = (int)((double)n * 0.46), i, k;
+    int harmonics = (int)((double)n * 0.46), i, k, j, n_formants = 0;
     if (n <= 0) return;
     if (harmonics > 64) harmonics = 64;
+    {
+        float sorted[32];
+        if (order > 32) order = 32;
+        memcpy(sorted, lsf, sizeof(float) * (size_t)order);
+        for (i = 1; i < order; i++) {
+            float value = sorted[i];
+            j = i;
+            while (j > 0 && sorted[j - 1] > value) {
+                sorted[j] = sorted[j - 1];
+                j--;
+            }
+            sorted[j] = value;
+        }
+        for (i = 0; i + 1 < order && n_formants < 16; i++) {
+            double gap = (double)(sorted[i + 1] - sorted[i]) * sr;
+            double width = gap * 1.6;
+            if (width < 140.0) width = 140.0;
+            if (width > 650.0) width = 650.0;
+            formant_hz[n_formants] = 0.5 * (sorted[i] + sorted[i + 1]) * sr;
+            formant_width[n_formants] = width;
+            formant_strength[n_formants] = 3.0 * exp(-gap / 450.0);
+            n_formants++;
+        }
+    }
     for (i = 0; i < n; i++) source_energy += (double)x[i] * x[i];
     if (harmonics < 1 || source_energy <= 0.0 || gain == 0.0f) {
         memset(x, 0, sizeof(float) * (size_t)n);
@@ -721,7 +750,7 @@ static void concat_harmonic_render(sam_synth *s, float *x, int n, double sr, flo
     for (k = 1; k <= harmonics; k++) {
         double omega = two_pi * k / n;
         double re = 0.0, im = 0.0, magnitude, frequency = (double)k * sr / n;
-        double taper = 1.0;
+        double taper = 1.0, formant_gain = 1.0, target_phase, delta;
         for (i = 0; i < n; i++) {
             re += (double)x[i] * cos(omega * i);
             im -= (double)x[i] * sin(omega * i);
@@ -732,7 +761,23 @@ static void concat_harmonic_render(sam_synth *s, float *x, int n, double sr, flo
             if (fade < 0.0) fade = 0.0;
             taper = 0.5 - 0.5 * cos(3.141592653589793 * fade);
         }
-        weights[k - 1] = magnitude * taper / pow((double)k, 0.25);
+        for (j = 0; j < n_formants; j++) {
+            double distance = (frequency - formant_hz[j]) / formant_width[j];
+            double peak = 1.0 + formant_strength[j] * exp(-0.5 * distance * distance);
+            if (peak > formant_gain) formant_gain = peak;
+        }
+        weights[k - 1] = magnitude * taper * formant_gain / pow((double)k, 0.25);
+        target_phase = atan2(im, re) + 0.5 * 3.141592653589793;
+        if (!s->concat_phase_valid[k - 1]) {
+            phase_start[k - 1] = target_phase;
+            s->concat_phase_valid[k - 1] = 1;
+        } else {
+            phase_start[k - 1] = s->concat_phase_offset[k - 1];
+        }
+        delta = atan2(sin(target_phase - phase_start[k - 1]),
+                      cos(target_phase - phase_start[k - 1]));
+        phase_target[k - 1] = phase_start[k - 1] + delta;
+        s->concat_phase_offset[k - 1] = phase_target[k - 1];
         harmonic_energy += weights[k - 1] * weights[k - 1] * 0.5;
     }
     if (harmonic_energy <= 0.0) {
@@ -745,8 +790,11 @@ static void concat_harmonic_render(sam_synth *s, float *x, int n, double sr, flo
     }
     for (i = 0; i < n; i++) {
         double sample = 0.0;
-        for (k = 1; k <= harmonics; k++)
-            sample += weights[k - 1] * sin(two_pi * k * phase);
+        double mix = (double)(i + 1) / n;
+        for (k = 1; k <= harmonics; k++) {
+            double offset = phase_start[k - 1] + mix * (phase_target[k - 1] - phase_start[k - 1]);
+            sample += weights[k - 1] * sin(two_pi * k * phase + offset);
+        }
         x[i] = (float)sample;
         phase += 1.0 / n;
         if (phase >= 1.0) phase -= 1.0;
@@ -1244,7 +1292,7 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
                                 (double)(float)(s->p.out_rate > 0 ? s->p.out_rate : v->rate), 0.08);
         } else if (s->p.vocoder == SAM_VOCODER_BIGVGAN_CONCAT) {
             if (u.periods[f] > 0.0f) {
-                concat_harmonic_render(s, dst, n, sr, s->p.gain);
+                concat_harmonic_render(s, u.lsf + f * u.order, dst, n, u.order, sr, s->p.gain);
             } else {
                 if (s->p.gain != 1.0f)
                     for (i = 0; i < n; i++) dst[i] = (float)((double)dst[i] * s->p.gain);
