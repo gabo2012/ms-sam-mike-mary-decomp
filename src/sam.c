@@ -45,6 +45,8 @@ struct sam_synth {
     int chunk_pos;       /* position inside the engine's output chunk */
     double bigvgan_phase; /* continuous phase for the harmonic/residual vocoder */
     double bigvgan_gain;  /* smoothed peak-control gain across frames and segments */
+    double spectral_f0;
+    int spectral_f0_valid;
     double spectral_phase[64];
     double spectral_amplitude[64];
     unsigned char spectral_phase_valid[64];
@@ -694,7 +696,22 @@ static void spectral_render_frame(sam_synth *s, const float *a, float *x, int n,
     double amplitude[64], target_phase[64], start_amplitude[64], phase = s->bigvgan_phase;
     double sr = (double)(float)(s->p.out_rate > 0 ? s->p.out_rate : s->v->rate);
     double phase_smoothing = 1.0 - exp(-(double)n / (sr * 0.012));
-    int harmonics = (int)((double)n * 0.32), i, k;
+    double start_f0, target_f0, max_f0;
+    int harmonics, i, k;
+    if (n <= 0) return;
+    target_f0 = sr / n;
+    if (!s->spectral_f0_valid) {
+        s->spectral_f0 = target_f0;
+        s->spectral_f0_valid = 1;
+    }
+    start_f0 = s->spectral_f0;
+    if (voiced) {
+        double smoothing = 1.0 - exp(-(double)n / (sr * 0.008));
+        s->spectral_f0 += smoothing * (target_f0 - s->spectral_f0);
+    }
+    target_f0 = s->spectral_f0;
+    max_f0 = start_f0 > target_f0 ? start_f0 : target_f0;
+    harmonics = (int)(sr * 0.32 / max_f0);
     if (harmonics > 64) harmonics = 64;
     if (harmonics < 1) {
         memset(x, 0, sizeof(float) * (size_t)n);
@@ -741,14 +758,15 @@ static void spectral_render_frame(sam_synth *s, const float *a, float *x, int n,
     for (i = 0; i < n; i++) {
         double sample = 0.0;
         double frame_mix = (double)(i + 1) / n;
+        double f0 = start_f0 + frame_mix * (target_f0 - start_f0);
         for (k = 1; k <= harmonics; k++) {
             double amp = start_amplitude[k - 1] +
                          frame_mix * (amplitude[k - 1] - start_amplitude[k - 1]);
             sample += amp * sin(two_pi * k * phase + s->spectral_phase[k - 1]);
         }
         x[i] = (float)sample;
-        phase += 1.0 / n;
-        if (phase >= 1.0) phase -= 1.0;
+        phase += f0 / sr;
+        phase -= floor(phase);
     }
     s->bigvgan_phase = phase;
 }

@@ -91,9 +91,10 @@ brightness, while a conservative Nyquist margin and smooth harmonic taper reduce
 inspired by neural vocoders' harmonic-rich, anti-aliased
 output, but is not the BigVGAN neural model and does not load its weights. The spectral mode uses
 the voice's stored LPC envelope as spectral data, but synthesizes by additive sinusoidal resynthesis
-rather than LPC filtering. Its partials stay below 64% of Nyquist, taper smoothly near the cutoff,
-and interpolate amplitude between frames to reduce aliasing from both high-frequency partials and
-rapid envelope changes. Generated modes reduce
+rather than LPC filtering. Its partials stay below 64% of Nyquist (using the highest pitch during a
+transition), taper smoothly near the cutoff, and interpolate pitch and amplitude across frames.
+Pitch phase is carried continuously across acoustic units to reduce aliasing and clicks at pitch and
+unit boundaries. Generated modes reduce
 peaks only when needed; gain reduction is smoothed across frames and segments to avoid audible level
 jumps. Library users can select `"residual"`, `"pulse"`, `"bigvgan"` or `"spectral"` with
 `sam_tts_set_vocoder()`, or set `sam_params.vocoder` before creating a low-level synthesizer.
