@@ -49,6 +49,7 @@ struct sam_synth {
     double w_o0, w_o1, w_s0, w_s1, w_nat, w_hold;
     unsigned vib_state;  /* synth +0x80 */
     double vocoder_phase;
+    float vocoder_gain;
     float *buf;          /* scratch output */
     size_t buf_cap;
 };
@@ -629,6 +630,26 @@ static void bigvgan_inspired_source(sam_synth *s, const float *src, int src_n, f
     s->vocoder_phase = phase;
 }
 
+static void limit_bigvgan_output(sam_synth *s, float *x, int n, double sr)
+{
+    const float ceiling = 30000.0f;
+    float peak = 0.0f, gain;
+    int i;
+    for (i = 0; i < n; i++) {
+        float magnitude = fabsf(x[i]);
+        if (magnitude > peak) peak = magnitude;
+    }
+    if (s->vocoder_gain <= 0.0f || s->vocoder_gain > 1.0f) s->vocoder_gain = 1.0f;
+    gain = s->vocoder_gain + (float)(2.0 * n / sr);
+    if (gain > 1.0f) gain = 1.0f;
+    if (peak > 0.0f && peak * gain > ceiling) gain = ceiling / peak;
+    s->vocoder_gain = gain;
+    if (gain != 1.0f) {
+        for (i = 0; i < n; i++) x[i] *= gain;
+        for (i = 0; i <= s->v->order; i++) s->mem[i] *= gain;
+    }
+}
+
 /* FUN_5ed42a8f: clip to [-32768, 32767], then float -> int16 by truncation */
 static int16_t to_pcm(float x)
 {
@@ -752,6 +773,7 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
         int n = (int)(sr * (double)g.dur);
         memset(s->mem, 0, sizeof(float) * (v->order + 1));
         s->vocoder_phase = 0.0;
+        s->vocoder_gain = 1.0f;
         out = scratch(s, (size_t)n + 1);
         if (!out) return -1;
         for (i = 0; i < n; i++) out[i] = 0.0f;
@@ -872,6 +894,8 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
             }
         }
         lpc_filter(s, a, dst, n, s->p.gain);
+        if (s->p.vocoder == SAM_VOCODER_BIGVGAN_INSPIRED)
+            limit_bigvgan_output(s, dst, n, sr);
         n_out += (size_t)n;
         tsamp += n;
         s->chunk_pos += n;

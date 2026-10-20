@@ -112,7 +112,8 @@ It builds a band-limited, phase-continuous harmonic excitation for voiced frames
 small amount of the voice's recorded residual, and keeps the decoded LPC envelope and unvoiced
 noise. This mode needs no model files or runtime dependencies and is intended as an experimental,
 BigVGAN-inspired alternative; it is **not** the neural BigVGAN model and cannot reproduce its
-learned sound without trained weights. The default `--vocoder sam` keeps the original renderer.
+learned sound without trained weights. A gentle peak limiter keeps its output below full scale;
+the default `--vocoder sam` keeps the original renderer unchanged.
 The same option is available in the `sam` CLI, and library hosts can select it with
 `sam_tts_set_vocoder(t, "bigvgan-inspired")`.
 
