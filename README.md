@@ -82,7 +82,8 @@ residual-excitation LPC synthesis), `--vocoder pulse` (generated glottal pulses 
 voiced residuals), or `--vocoder bigvgan` (a lightweight DSP approximation using a phase-continuous,
 band-limited harmonic source mixed with a small amount of decoded residual detail). All three use
 the same voice file, unit selection, LPC filters, pitch and duration contours. The `bigvgan` option
-is inspired by neural vocoders' harmonic-rich, anti-aliased output, but is not the BigVGAN neural
+uses a conservative Nyquist margin and smooth harmonic taper to reduce aliasing. It is inspired by
+neural vocoders' harmonic-rich, anti-aliased output, but is not the BigVGAN neural
 model and does not load its weights. Generated-excitation modes apply per-segment gain reduction
 only when needed to avoid clipping. Library users can select `"residual"`, `"pulse"` or `"bigvgan"` with
 `sam_tts_set_vocoder()`, or set `sam_params.vocoder` before creating a low-level synthesizer.

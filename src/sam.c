@@ -636,9 +636,10 @@ static void bigvgan_excitation(sam_synth *s, float *x, int n)
 {
     const double residual_mix = 0.2;
     double source_energy = 0.0, harmonic_energy = 0.0, mixed_energy = 0.0, phase = s->bigvgan_phase;
-    int harmonics = n / 2 - 1, i;
+    int harmonics = (int)((double)n * 0.4), i;
     double weights[64];
     int k;
+    /* Keep partials below 80% of Nyquist to reduce aliasing as pitch changes. */
     if (harmonics > 64) harmonics = 64;
     for (i = 0; i < n; i++) source_energy += (double)x[i] * x[i];
     if (harmonics < 1 || source_energy <= 0.0) {
@@ -647,8 +648,8 @@ static void bigvgan_excitation(sam_synth *s, float *x, int n)
     }
     for (k = 1; k <= harmonics; k++) {
         double weight = 1.0 / sqrt((double)k);
-        if (harmonics >= 4 && k > harmonics - 4) {
-            double fade = (double)(harmonics - k) / 4.0;
+        if (harmonics >= 8 && k > harmonics - 8) {
+            double fade = (double)(harmonics - k) / 8.0;
             weight *= 0.5 - 0.5 * cos(3.141592653589793 * fade);
         }
         weights[k - 1] = weight;
