@@ -26,6 +26,9 @@ enum {
 
 typedef struct sam_voice sam_voice;
 typedef struct sam_synth sam_synth;
+/* LPC coefficients and the RMS level of the excitation for one output frame. */
+typedef int (*sam_lpc_frame_cb)(void *user, const float *lpc, int order, int samples, int voiced, float amp,
+                                int sample_rate);
 
 /* One back-end segment, as produced by the engine's front end (the "segment record"). */
 typedef struct {
@@ -56,6 +59,8 @@ typedef struct {
     int whisper;         /* SAPI 4 Whisper: every frame gets noise excitation */
     int monotone;        /* SAPI 4 RoboSoft: every pitch point = the base pitch */
     int vocoder;         /* SAM_VOCODER_*; default preserves the original LPC renderer */
+    sam_lpc_frame_cb lpc_frame_cb; /* optional per-frame LPC feature export */
+    void *lpc_frame_user;
 } sam_params;
 
 void sam_params_default(sam_params *p);

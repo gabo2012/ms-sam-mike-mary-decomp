@@ -121,6 +121,29 @@ the default `--vocoder sam` keeps the original renderer unchanged.
 The same option is available in the `sam` CLI, and library hosts can select it with
 `sam_tts_set_vocoder(t, "bigvgan-inspired")`.
 
+### Neural BigVGAN (offline)
+
+`tools/bigvgan_say.py` runs an actual NVIDIA BigVGAN checkpoint. It first asks `sam_say` to export
+timed LPC frames, converts their spectral envelopes to the mel layout configured by the checkpoint,
+then runs one whole-utterance PyTorch inference. Unlike `bigvgan-inspired`, this requires Python,
+NumPy, librosa, PyTorch, a local checkout of NVIDIA's BigVGAN repository with its dependencies
+installed, and a compatible checkpoint directory containing `config.json` and
+`bigvgan_generator.pt`. No model weights or voice data are included. LPC-derived mels are an
+adaptation rather than the waveform-derived features used to train standard BigVGAN checkpoints,
+so voice quality depends on the checkpoint and may differ from a model trained on these features.
+
+```
+python tools\bigvgan_say.py `
+  --sam-say build\x64\sam_say.exe `
+  --data data\voice `
+  --bigvgan-repo C:\models\BigVGAN `
+  --checkpoint C:\models\bigvgan-v2 `
+  "Hello, my name is Microsoft Sam." out.wav
+```
+
+Use `--checkpoint` with either that model directory or its `bigvgan_generator.pt` file. The
+`--device` option accepts `auto` (default), `cpu`, or `cuda`.
+
 ### Singing
 
 `--sing` treats the text as a score, one word per line: the word with syllables split by `-`, then a

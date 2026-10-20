@@ -510,6 +510,8 @@ void sam_params_default(sam_params *p)
     p->monotone = 0;
     p->no_reverse = 0;
     p->vocoder = SAM_VOCODER_SAM;
+    p->lpc_frame_cb = NULL;
+    p->lpc_frame_user = NULL;
 }
 
 sam_synth *sam_synth_new(const sam_voice *v, const sam_params *p)
@@ -689,6 +691,15 @@ static void emit(const float *x, int n, sam_pcm_cb cb, void *user)
     }
 }
 
+static float excitation_rms(const float *x, int n)
+{
+    double sum = 0.0;
+    int i;
+    if (n <= 0) return 0.0f;
+    for (i = 0; i < n; i++) sum += (double)x[i] * x[i];
+    return (float)sqrt(sum / n);
+}
+
 int sam_synth_unit_raw(sam_synth *s, int index, sam_pcm_cb cb, void *user)
 {
     const sam_voice *v;
@@ -707,6 +718,10 @@ int sam_synth_unit_raw(sam_synth *s, int index, sam_pcm_cb cb, void *user)
             bigvgan_inspired_source(s, u.exc + pos, n, dst, n, n);
         else
             memcpy(dst, u.exc + pos, sizeof(float) * (size_t)n);
+        if (s->p.lpc_frame_cb &&
+            s->p.lpc_frame_cb(s->p.lpc_frame_user, u.lpc + frame * (u.order + 1), u.order, n,
+                              u.periods[frame] > 0.0f, excitation_rms(dst, n), v->rate) != 0)
+            goto done;
         lpc_filter(s, u.lpc + frame * (u.order + 1), dst, n, s->p.gain);
         if (s->p.vocoder == SAM_VOCODER_BIGVGAN_INSPIRED) {
             if (u.periods[frame] <= 0.0f) {
@@ -836,6 +851,8 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
         memset(s->mem, 0, sizeof(float) * (v->order + 1));
         s->vocoder_phase = 0.0;
         s->unvoiced_lp = 0.0f;
+        if (s->p.lpc_frame_cb && s->p.lpc_frame_cb(s->p.lpc_frame_user, NULL, v->order, n, 0, 0.0f, (int)sr))
+            return -1;
         out = scratch(s, (size_t)n + 1);
         if (!out) return -1;
         for (i = 0; i < n; i++) out[i] = 0.0f;
@@ -955,6 +972,10 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
                 }
             }
         }
+        if (s->p.lpc_frame_cb &&
+            s->p.lpc_frame_cb(s->p.lpc_frame_user, a, u.order, n, u.periods[f] > 0.0f,
+                              excitation_rms(dst, n), (int)sr))
+            goto callback_error;
         lpc_filter(s, a, dst, n, s->p.gain);
         if (s->p.vocoder == SAM_VOCODER_BIGVGAN_INSPIRED) {
             if (u.periods[f] <= 0.0f) {
@@ -982,6 +1003,13 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
     free(rev);
     sam_unit_free(&u);
     return 0;
+callback_error:
+    free(offs);
+    free(frame);
+    free(len);
+    free(rev);
+    sam_unit_free(&u);
+    return -1;
 oom:
     free(offs);
     free(frame);
