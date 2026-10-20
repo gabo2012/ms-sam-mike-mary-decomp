@@ -115,7 +115,8 @@ and is intended as an experimental BigVGAN-inspired alternative; it is **not** t
 model and cannot reproduce its
 learned sound without trained weights. Voiced excitation uses a softer harmonic slope and lower
 level to reduce harshness and leave headroom for vowel formants; a low-harmonic trim reduces bass,
-and a gentle peak limiter keeps output below full scale;
+unvoiced consonant frames get a gentle 5.5 kHz low-pass to tame hiss, and a peak limiter keeps
+output below full scale;
 the default `--vocoder sam` keeps the original renderer unchanged.
 The same option is available in the `sam` CLI, and library hosts can select it with
 `sam_tts_set_vocoder(t, "bigvgan-inspired")`.

@@ -50,6 +50,7 @@ struct sam_synth {
     unsigned vib_state;  /* synth +0x80 */
     double vocoder_phase;
     float vocoder_gain;
+    float unvoiced_lp;
     float *buf;          /* scratch output */
     size_t buf_cap;
 };
@@ -657,6 +658,17 @@ static void limit_bigvgan_output(sam_synth *s, float *x, int n, double sr)
     }
 }
 
+static void filter_bigvgan_unvoiced(sam_synth *s, float *x, int n, double sr)
+{
+    const double cutoff = 5500.0;
+    double alpha = exp(-2.0 * 3.14159265358979323846 * cutoff / sr);
+    int i;
+    for (i = 0; i < n; i++) {
+        s->unvoiced_lp = (float)((1.0 - alpha) * x[i] + alpha * s->unvoiced_lp);
+        x[i] = s->unvoiced_lp;
+    }
+}
+
 /* FUN_5ed42a8f: clip to [-32768, 32767], then float -> int16 by truncation */
 static int16_t to_pcm(float x)
 {
@@ -695,7 +707,11 @@ int sam_synth_unit_raw(sam_synth *s, int index, sam_pcm_cb cb, void *user)
         else
             memcpy(dst, u.exc + pos, sizeof(float) * (size_t)n);
         lpc_filter(s, u.lpc + frame * (u.order + 1), dst, n, s->p.gain);
-        if (s->p.vocoder == SAM_VOCODER_BIGVGAN_INSPIRED) limit_bigvgan_output(s, dst, n, v->rate);
+        if (s->p.vocoder == SAM_VOCODER_BIGVGAN_INSPIRED) {
+            if (u.periods[frame] <= 0.0f) filter_bigvgan_unvoiced(s, dst, n, v->rate);
+            else s->unvoiced_lp = 0.0f;
+            limit_bigvgan_output(s, dst, n, v->rate);
+        }
         pos += n;
     }
     if (s->p.reverse_units)
@@ -936,8 +952,11 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
             }
         }
         lpc_filter(s, a, dst, n, s->p.gain);
-        if (s->p.vocoder == SAM_VOCODER_BIGVGAN_INSPIRED)
+        if (s->p.vocoder == SAM_VOCODER_BIGVGAN_INSPIRED) {
+            if (u.periods[f] <= 0.0f) filter_bigvgan_unvoiced(s, dst, n, sr);
+            else s->unvoiced_lp = 0.0f;
             limit_bigvgan_output(s, dst, n, sr);
+        }
         n_out += (size_t)n;
         tsamp += n;
         s->chunk_pos += n;
