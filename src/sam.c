@@ -47,6 +47,7 @@ struct sam_synth {
     double bigvgan_gain;  /* smoothed peak-control gain across frames and segments */
     double spectral_f0;
     int spectral_f0_valid;
+    int spectral_harmonics;
     double spectral_phase[64];
     double spectral_amplitude[64];
     unsigned char spectral_phase_valid[64];
@@ -693,11 +694,11 @@ static void bigvgan_render_frame(sam_synth *s, const float *a, float *x, int n, 
 static void spectral_render_frame(sam_synth *s, const float *a, float *x, int n, float gain, int voiced)
 {
     const double two_pi = 6.283185307179586;
-    double amplitude[64], target_phase[64], start_amplitude[64], phase = s->bigvgan_phase;
+    double amplitude[64], target_phase[64], start_amplitude[64], start_phase[64], phase = s->bigvgan_phase;
     double sr = (double)(float)(s->p.out_rate > 0 ? s->p.out_rate : s->v->rate);
     double phase_smoothing = 1.0 - exp(-(double)n / (sr * 0.012));
     double start_f0, target_f0, max_f0;
-    int harmonics, i, k;
+    int harmonics, render_harmonics, i, k;
     if (n <= 0) return;
     target_f0 = sr / n;
     if (!s->spectral_f0_valid) {
@@ -713,10 +714,8 @@ static void spectral_render_frame(sam_synth *s, const float *a, float *x, int n,
     max_f0 = start_f0 > target_f0 ? start_f0 : target_f0;
     harmonics = (int)(sr * 0.4 / max_f0);
     if (harmonics > 64) harmonics = 64;
-    if (harmonics < 1) {
-        memset(x, 0, sizeof(float) * (size_t)n);
-        return;
-    }
+    render_harmonics = harmonics > s->spectral_harmonics ? harmonics : s->spectral_harmonics;
+    if (render_harmonics > 64) render_harmonics = 64;
     for (k = 1; k <= harmonics; k++) {
         double omega = two_pi * k / n;
         double xr = 0.0, xi = 0.0, ar = 0.0, ai = 0.0;
@@ -737,16 +736,13 @@ static void spectral_render_frame(sam_synth *s, const float *a, float *x, int n,
             amplitude[k - 1] = (2.0 * magnitude / n) * env * gain;
             target_phase[k - 1] = atan2(xi, xr) - atan2(ai, ar);
         }
-        if (!voiced) {
-            s->spectral_phase[k - 1] = target_phase[k - 1];
-            s->spectral_phase_valid[k - 1] = 1;
-        } else if (!s->spectral_phase_valid[k - 1]) {
+        if (!s->spectral_phase_valid[k - 1]) {
             s->spectral_phase[k - 1] = target_phase[k - 1];
             s->spectral_phase_valid[k - 1] = 1;
         } else {
             double delta = target_phase[k - 1] - s->spectral_phase[k - 1];
             delta = atan2(sin(delta), cos(delta));
-            s->spectral_phase[k - 1] += phase_smoothing * delta;
+            s->spectral_phase[k - 1] += (voiced ? phase_smoothing : 1.0) * delta;
         }
         {
             double frequency = k * max_f0;
@@ -758,22 +754,37 @@ static void spectral_render_frame(sam_synth *s, const float *a, float *x, int n,
             }
         }
         start_amplitude[k - 1] = s->spectral_amplitude[k - 1];
+        start_phase[k - 1] = s->spectral_phase[k - 1] -
+                             (voiced ? phase_smoothing : 1.0) *
+                                 atan2(sin(target_phase[k - 1] - s->spectral_phase[k - 1]),
+                                       cos(target_phase[k - 1] - s->spectral_phase[k - 1]));
+        target_phase[k - 1] = s->spectral_phase[k - 1];
         s->spectral_amplitude[k - 1] = amplitude[k - 1];
+    }
+    for (k = harmonics; k < render_harmonics; k++) {
+        start_amplitude[k] = s->spectral_amplitude[k];
+        amplitude[k] = 0.0;
+        start_phase[k] = s->spectral_phase[k];
+        target_phase[k] = s->spectral_phase[k];
+        s->spectral_amplitude[k] = 0.0;
     }
     for (i = 0; i < n; i++) {
         double sample = 0.0;
         double frame_mix = (double)(i + 1) / n;
         double f0 = start_f0 + frame_mix * (target_f0 - start_f0);
-        for (k = 1; k <= harmonics; k++) {
+        for (k = 1; k <= render_harmonics; k++) {
             double amp = start_amplitude[k - 1] +
                          frame_mix * (amplitude[k - 1] - start_amplitude[k - 1]);
-            sample += amp * sin(two_pi * k * phase + s->spectral_phase[k - 1]);
+            double phase_offset = start_phase[k - 1] +
+                                  frame_mix * (target_phase[k - 1] - start_phase[k - 1]);
+            sample += amp * sin(two_pi * k * phase + phase_offset);
         }
         x[i] = (float)sample;
         phase += f0 / sr;
         phase -= floor(phase);
     }
     s->bigvgan_phase = phase;
+    s->spectral_harmonics = harmonics;
 }
 
 static void pulse_peak_control(float *x, size_t n)
