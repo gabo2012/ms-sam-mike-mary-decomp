@@ -123,14 +123,14 @@ The same option is available in the `sam` CLI, and library hosts can select it w
 
 ### Neural BigVGAN (offline)
 
-`tools/bigvgan_say.py` runs an actual NVIDIA BigVGAN checkpoint. It first asks `sam_say` to export
-timed LPC frames, converts their spectral envelopes to the mel layout configured by the checkpoint,
-then runs one whole-utterance PyTorch inference. Unlike `bigvgan-inspired`, this requires Python,
-NumPy, librosa, PyTorch, a local checkout of NVIDIA's BigVGAN repository with its dependencies
-installed, and a compatible checkpoint directory containing `config.json` and
-`bigvgan_generator.pt`. No model weights or voice data are included. LPC-derived mels are an
-adaptation rather than the waveform-derived features used to train standard BigVGAN checkpoints,
-so voice quality depends on the checkpoint and may differ from a model trained on these features.
+`tools/bigvgan_say.py` runs an actual NVIDIA BigVGAN checkpoint. It feeds the SAM reference waveform
+through NVIDIA's own waveform-to-mel frontend, with the volume normalization used during BigVGAN
+training, then runs one whole-utterance PyTorch inference. This keeps the input features consistent
+with standard checkpoints rather than approximating mels from LPC coefficients, which could cause
+unstable output. The wrapper also checks that the exported timing and reference audio agree and
+preserves exact silence spans. This requires Python, NumPy, librosa, PyTorch, a local checkout of
+NVIDIA's BigVGAN repository with its dependencies installed, and a compatible checkpoint directory
+containing `config.json` and `bigvgan_generator.pt`. No model weights or voice data are included.
 
 ```
 python tools\bigvgan_say.py `

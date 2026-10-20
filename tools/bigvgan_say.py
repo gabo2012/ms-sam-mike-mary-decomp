@@ -1,7 +1,6 @@
-"""Offline BigVGAN synthesis from SAM LPC-frame features."""
+"""Offline BigVGAN synthesis using the checkpoint's waveform-to-mel frontend."""
 
 import argparse
-import math
 import pathlib
 import struct
 import subprocess
@@ -22,9 +21,9 @@ def require_numpy():
     return numpy
 
 
-def read_lpc_frames(path):
-    np = require_numpy()
-    records = []
+def read_lpc_silence_ranges(path):
+    silence_ranges = []
+    total_samples = 0
     with open(path, "rb") as f:
         header = f.read(HEADER.size)
         if len(header) != HEADER.size:
@@ -38,20 +37,18 @@ def read_lpc_frames(path):
                 break
             if len(raw) != RECORD.size:
                 raise ValueError("truncated LPC frame record")
-            samples, flags, amp = RECORD.unpack(raw)
+            samples, flags, _amp = RECORD.unpack(raw)
             coeffs_raw = f.read(4 * (order + 1))
             if len(coeffs_raw) != 4 * (order + 1):
                 raise ValueError("truncated LPC coefficients")
-            if samples:
-                coeffs = np.frombuffer(coeffs_raw, dtype="<f4").astype(np.float64)
-                if not np.all(np.isfinite(coeffs)) or not math.isfinite(amp):
-                    raise ValueError("non-finite LPC feature")
-                if flags not in (0, 1, 2):
-                    raise ValueError("invalid LPC frame flags")
-                records.append((samples, flags, amp, coeffs))
-    if not records:
+            if flags not in (0, 1, 2):
+                raise ValueError("invalid LPC frame flags")
+            if samples and flags == 0:
+                silence_ranges.append((total_samples, total_samples + samples))
+            total_samples += samples
+    if total_samples == 0:
         raise ValueError("LPC feature file contains no audio frames")
-    return sample_rate, order, records
+    return sample_rate, total_samples, silence_ranges
 
 
 def load_bigvgan(checkpoint, repo, device):
@@ -83,75 +80,45 @@ def load_bigvgan(checkpoint, repo, device):
     return torch, model, h
 
 
-def lpc_to_mels(sample_rate, records, h):
+def reference_to_mels(path, h, torch, device):
     np = require_numpy()
     try:
         import librosa
+        from meldataset import get_mel_spectrogram
     except ImportError as exc:
-        raise RuntimeError("librosa is required; install the BigVGAN environment requirements") from exc
+        raise RuntimeError(
+            "BigVGAN mel dependencies are unavailable; install the BigVGAN environment requirements"
+        ) from exc
 
     target_rate = int(h.sampling_rate)
     hop = int(h.hop_size)
-    n_fft = int(h.n_fft)
-    n_mels = int(h.num_mels)
-    if target_rate <= 0 or hop <= 0 or n_fft <= 0 or n_mels <= 0:
+    if target_rate <= 0 or hop <= 0:
         raise ValueError("invalid BigVGAN STFT parameters in checkpoint config")
-    fmax = getattr(h, "fmax", None)
-    if fmax is None:
-        fmax = target_rate / 2
-    fmax = min(fmax, sample_rate / 2)
-    if fmax <= h.fmin:
-        raise ValueError("BigVGAN mel range exceeds the source LPC sample rate")
-    mel_basis = librosa.filters.mel(
-        sr=target_rate,
-        n_fft=n_fft,
-        n_mels=n_mels,
-        fmin=h.fmin,
-        fmax=fmax,
-    ).astype(np.float64)
-    frequencies = np.arange(n_fft // 2 + 1, dtype=np.float64) * target_rate / n_fft
-    angular = 2.0 * np.pi * frequencies / sample_rate
-    powers = np.exp(-1j * angular[:, None] * np.arange(records[0][3].size)[None, :])
-    frame_mels = []
-    centers = []
-    silence_ranges = []
-    cursor = 0
-    for samples, flags, amp, coeffs in records:
-        center = cursor + samples * 0.5
-        centers.append(center * target_rate / sample_rate)
-        if flags == 0:
-            mel = np.full(n_mels, np.log(1e-5), dtype=np.float64)
-            silence_ranges.append((cursor, cursor + samples))
-        else:
-            response = powers @ coeffs
-            envelope = 1.0 / np.maximum(np.abs(response), 1e-6)
-            envelope *= max(abs(amp), 1e-5)
-            mel = np.log(np.maximum(mel_basis @ envelope, 1e-5))
-        frame_mels.append(mel)
-        cursor += samples
+    with wave.open(str(path), "rb") as source:
+        if source.getnchannels() != 1 or source.getsampwidth() != 2:
+            raise ValueError("sam_say reference WAV must be 16-bit mono PCM")
+        source_rate = source.getframerate()
+        audio = np.frombuffer(source.readframes(source.getnframes()), dtype="<i2").astype(np.float32) / 32768.0
+    if source_rate <= 0 or audio.size == 0:
+        raise ValueError("sam_say produced an empty or invalid reference WAV")
+    source_samples = audio.size
+    if source_rate != target_rate:
+        audio = librosa.resample(audio, orig_sr=source_rate, target_sr=target_rate)
 
-    total_samples = int(round(cursor * target_rate / sample_rate))
-    frame_count = max(1, int(math.ceil(total_samples / hop)))
-    positions = np.minimum(np.arange(frame_count) * hop + hop * 0.5, total_samples)
-    centers = np.asarray(centers, dtype=np.float64)
-    frame_mels = np.asarray(frame_mels, dtype=np.float64)
-    mel = np.empty((n_mels, frame_count), dtype=np.float32)
-    for band in range(n_mels):
-        mel[band] = np.interp(positions, centers, frame_mels[:, band]).astype(np.float32)
-
-    linear_mel = np.exp(mel)
-    peak = float(linear_mel.max())
-    if peak > 0.0:
-        linear_mel *= 10.0 / peak
-    mel = np.log(np.maximum(linear_mel, 1e-5)).astype(np.float32)
-    return mel, target_rate, total_samples, silence_ranges
+    audio = librosa.util.normalize(audio) * 0.95
+    target_samples = audio.size - audio.size % hop
+    if target_samples <= 0:
+        raise ValueError("speech is shorter than one BigVGAN hop")
+    audio = np.ascontiguousarray(audio[:target_samples], dtype=np.float32)
+    waveform = torch.from_numpy(audio).unsqueeze(0).to(device)
+    mel = get_mel_spectrogram(waveform, h)
+    return mel, target_rate, target_samples, source_rate, source_samples
 
 
 def write_wav(path, audio, sample_rate, target_samples, source_rate, silence_ranges):
     np = require_numpy()
-    audio = audio[:target_samples]
-    if audio.size < target_samples:
-        audio = np.pad(audio, (0, target_samples - audio.size))
+    if audio.size != target_samples:
+        raise ValueError(f"BigVGAN returned {audio.size} samples; expected {target_samples}")
     for start, end in silence_ranges:
         lo = int(start * sample_rate / source_rate)
         hi = min(target_samples, int(end * sample_rate / source_rate))
@@ -193,7 +160,7 @@ def main():
             str(reference),
         ]
         subprocess.run(command, check=True)
-        source_rate, _, records = read_lpc_frames(features)
+        source_rate, source_samples, silence_ranges = read_lpc_silence_ranges(features)
         try:
             import torch
         except ImportError as exc:
@@ -204,10 +171,15 @@ def main():
         if device == "cuda" and not torch.cuda.is_available():
             raise RuntimeError("CUDA was requested but is not available in this PyTorch installation")
         torch, model, h = load_bigvgan(args.checkpoint, args.bigvgan_repo, device)
-        mel, output_rate, target_samples, silence_ranges = lpc_to_mels(source_rate, records, h)
-        features_tensor = torch.from_numpy(mel).unsqueeze(0).to(device)
+        mel, output_rate, target_samples, reference_rate, reference_samples = reference_to_mels(
+            reference, h, torch, device
+        )
+        if (source_rate, source_samples) != (reference_rate, reference_samples):
+            raise RuntimeError("SAM audio and exported LPC timing do not match")
         with torch.inference_mode():
-            generated = model(features_tensor).squeeze().float().cpu().numpy()
+            generated = model(mel).reshape(-1).float().cpu().numpy()
+        if not require_numpy().isfinite(generated).all():
+            raise RuntimeError("BigVGAN generated non-finite audio samples")
         write_wav(args.output, generated, output_rate, target_samples, source_rate, silence_ranges)
     return 0
 
