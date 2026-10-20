@@ -113,8 +113,9 @@ residual sets excitation level only; its waveform is not mixed into the output. 
 envelope and unvoiced noise are retained. This mode needs no model files or runtime dependencies
 and is intended as an experimental BigVGAN-inspired alternative; it is **not** the neural BigVGAN
 model and cannot reproduce its
-learned sound without trained weights. Voiced excitation is attenuated to leave headroom for vowel
-formants, with a low-harmonic trim to reduce bass, and a gentle peak limiter keeps its output below full scale;
+learned sound without trained weights. Voiced excitation uses a softer harmonic slope and lower
+level to reduce harshness and leave headroom for vowel formants; a low-harmonic trim reduces bass,
+and a gentle peak limiter keeps output below full scale;
 the default `--vocoder sam` keeps the original renderer unchanged.
 The same option is available in the `sam` CLI, and library hosts can select it with
 `sam_tts_set_vocoder(t, "bigvgan-inspired")`.
