@@ -606,7 +606,14 @@ static void bigvgan_inspired_source(sam_synth *s, const float *src, int src_n, f
     if (max_h > 128) max_h = 128;
     if (max_h < 1) max_h = 1;
     for (h = 1; h <= max_h; h++) {
-        weights[h] = pow((double)h, -0.7);
+        double frequency = (double)h / period;
+        double taper = 1.0;
+        if (frequency > 0.40) {
+            double x = (frequency - 0.40) / 0.08;
+            if (x > 1.0) x = 1.0;
+            taper = 0.5 + 0.5 * cos(3.14159265358979323846 * x);
+        }
+        weights[h] = pow((double)h, -0.7) * taper;
         weight_sq += weights[h] * weights[h];
     }
     normalization = sqrt(2.0 / weight_sq);
