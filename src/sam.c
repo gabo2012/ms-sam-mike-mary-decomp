@@ -614,7 +614,8 @@ static void bigvgan_inspired_source(sam_synth *s, const float *src, int src_n, f
             if (x > 1.0) x = 1.0;
             taper = 0.5 + 0.5 * cos(3.14159265358979323846 * x);
         }
-        weights[h] = pow((double)h, -0.7) * taper;
+        double bass_trim = sqrt((double)h / (h + 3.0));
+        weights[h] = pow((double)h, -0.7) * taper * bass_trim;
         weight_sq += weights[h] * weights[h];
     }
     normalization = sqrt(2.0 / weight_sq);
