@@ -49,9 +49,7 @@ struct sam_synth {
     double spectral_f0;
     int spectral_f0_valid;
     int spectral_harmonics;
-    double spectral_phase[64];
     double spectral_amplitude[64];
-    unsigned char spectral_phase_valid[64];
     double spectral_noise_phase[128];
     double spectral_noise_frequency[128];
     double spectral_noise_amplitude[128];
@@ -698,14 +696,13 @@ static void bigvgan_render_frame(sam_synth *s, const float *a, float *x, int n, 
     s->bigvgan_phase = phase;
 }
 
-/* Additive sinusoidal synthesis from measured residual partials and the frame envelope. */
+/* Generate voiced harmonics from the frame's formant envelope, without decoded vowel excitation. */
 static void spectral_render_frame(sam_synth *s, const float *a, float *x, int n, float gain, int voiced)
 {
     const double two_pi = 6.283185307179586;
-    double amplitude[64], target_phase[64], start_amplitude[64], start_phase[64], phase = s->bigvgan_phase;
+    double amplitude[64], start_amplitude[64], phase = s->bigvgan_phase;
     double sr = (double)(float)(s->p.out_rate > 0 ? s->p.out_rate : s->v->rate);
-    double phase_smoothing = 1.0 - exp(-(double)n / (sr * 0.012));
-    double start_f0, target_f0, max_f0;
+    double start_f0, target_f0, max_f0, harmonic_energy = 0.0;
     int harmonics, render_harmonics, i, k;
     if (n <= 0) return;
     target_f0 = sr / n;
@@ -725,14 +722,9 @@ static void spectral_render_frame(sam_synth *s, const float *a, float *x, int n,
     render_harmonics = harmonics > s->spectral_harmonics ? harmonics : s->spectral_harmonics;
     if (render_harmonics > 64) render_harmonics = 64;
     for (k = 1; k <= harmonics; k++) {
-        double omega = two_pi * k / n;
-        double xr = 0.0, xi = 0.0, ar = 0.0, ai = 0.0;
+        double omega = two_pi * k * max_f0 / sr;
+        double ar = 0.0, ai = 0.0;
         int j;
-        for (i = 0; i < n; i++) {
-            double angle = omega * i;
-            xr += (double)x[i] * cos(angle);
-            xi -= (double)x[i] * sin(angle);
-        }
         for (j = 0; j <= s->v->order; j++) {
             ar += (double)a[j] * cos(omega * j);
             ai -= (double)a[j] * sin(omega * j);
@@ -740,17 +732,7 @@ static void spectral_render_frame(sam_synth *s, const float *a, float *x, int n,
         {
             double denominator = ar * ar + ai * ai;
             double env = denominator > 1e-18 ? 1.0 / sqrt(denominator) : 0.0;
-            double magnitude = sqrt(xr * xr + xi * xi);
-            amplitude[k - 1] = (2.0 * magnitude / n) * env * gain;
-            target_phase[k - 1] = atan2(xi, xr) - atan2(ai, ar);
-        }
-        if (!s->spectral_phase_valid[k - 1]) {
-            s->spectral_phase[k - 1] = target_phase[k - 1];
-            s->spectral_phase_valid[k - 1] = 1;
-        } else {
-            double delta = target_phase[k - 1] - s->spectral_phase[k - 1];
-            delta = atan2(sin(delta), cos(delta));
-            s->spectral_phase[k - 1] += (voiced ? phase_smoothing : 1.0) * delta;
+            amplitude[k - 1] = env / pow((double)k, 0.8);
         }
         {
             double frequency = k * max_f0;
@@ -761,19 +743,23 @@ static void spectral_render_frame(sam_synth *s, const float *a, float *x, int n,
                 amplitude[k - 1] *= 0.5 - 0.5 * cos(3.141592653589793 * fade);
             }
         }
-        start_amplitude[k - 1] = s->spectral_amplitude[k - 1];
-        start_phase[k - 1] = s->spectral_phase[k - 1] -
-                             (voiced ? phase_smoothing : 1.0) *
-                                 atan2(sin(target_phase[k - 1] - s->spectral_phase[k - 1]),
-                                       cos(target_phase[k - 1] - s->spectral_phase[k - 1]));
-        target_phase[k - 1] = s->spectral_phase[k - 1];
-        s->spectral_amplitude[k - 1] = amplitude[k - 1];
+        harmonic_energy += amplitude[k - 1] * amplitude[k - 1] * 0.5;
+    }
+    if (harmonic_energy <= 0.0 || gain == 0.0f) {
+        memset(x, 0, sizeof(float) * (size_t)n);
+        return;
+    }
+    {
+        double scale = 4000.0 * (double)gain / sqrt(harmonic_energy);
+        for (k = 0; k < harmonics; k++) amplitude[k] *= scale;
+    }
+    for (k = 0; k < harmonics; k++) {
+        start_amplitude[k] = s->spectral_amplitude[k];
+        s->spectral_amplitude[k] = amplitude[k];
     }
     for (k = harmonics; k < render_harmonics; k++) {
         start_amplitude[k] = s->spectral_amplitude[k];
         amplitude[k] = 0.0;
-        start_phase[k] = s->spectral_phase[k];
-        target_phase[k] = s->spectral_phase[k];
         s->spectral_amplitude[k] = 0.0;
     }
     for (i = 0; i < n; i++) {
@@ -783,9 +769,7 @@ static void spectral_render_frame(sam_synth *s, const float *a, float *x, int n,
         for (k = 1; k <= render_harmonics; k++) {
             double amp = start_amplitude[k - 1] +
                          frame_mix * (amplitude[k - 1] - start_amplitude[k - 1]);
-            double phase_offset = start_phase[k - 1] +
-                                  frame_mix * (target_phase[k - 1] - start_phase[k - 1]);
-            sample += amp * sin(two_pi * k * phase + phase_offset);
+            sample += amp * sin(two_pi * k * phase);
         }
         x[i] = (float)sample;
         phase += f0 / sr;
