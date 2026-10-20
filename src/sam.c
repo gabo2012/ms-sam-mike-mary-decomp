@@ -51,6 +51,8 @@ struct sam_synth {
     int spectral_harmonics;
     int spectral_last_voiced;
     int spectral_voicing_valid;
+    float spectral_last_sample;
+    int spectral_sample_valid;
     double spectral_amplitude[64];
     double spectral_noise_phase[128];
     double spectral_noise_frequency[128];
@@ -802,6 +804,29 @@ static void spectral_transition_fade(float *x, int n, double sr, int fade_in, in
     }
 }
 
+static void spectral_smooth_boundary(sam_synth *s, float *x, int n, double sr)
+{
+    int fade_samples = (int)(sr * 0.006), i;
+    if (n <= 0) return;
+    if (n == 1) {
+        s->spectral_last_sample = x[0];
+        s->spectral_sample_valid = 1;
+        return;
+    }
+    if (fade_samples < 2) fade_samples = 2;
+    if (fade_samples > n) fade_samples = n;
+    if (s->spectral_sample_valid) {
+        double correction = (double)s->spectral_last_sample - x[0];
+        for (i = 0; i < fade_samples; i++) {
+            double phase = (double)i / (fade_samples - 1);
+            double weight = 0.5 + 0.5 * cos(3.141592653589793 * phase);
+            x[i] = (float)(x[i] + correction * weight);
+        }
+    }
+    s->spectral_last_sample = x[n - 1];
+    s->spectral_sample_valid = 1;
+}
+
 /* Generated broadband consonants, shaped by the frame envelope but not its decoded samples. */
 static void spectral_render_noise(sam_synth *s, const float *a, float *x, int n, float level)
 {
@@ -1031,6 +1056,10 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
         out = scratch(s, (size_t)n + 1);
         if (!out) return -1;
         for (i = 0; i < n; i++) out[i] = 0.0f;
+        if (s->p.vocoder == SAM_VOCODER_SPECTRAL)
+            spectral_smooth_boundary(s, out, n, sr);
+        else
+            s->spectral_sample_valid = 0;
         s->chunk_pos = (s->chunk_pos + n) % (CHUNK_FLUSH + 1);
         emit(out, n, cb, user);
         return 0;
@@ -1184,6 +1213,10 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
             out[i] = out[n_out - 1 - i];
             out[n_out - 1 - i] = tmp;
         }
+    if (s->p.vocoder == SAM_VOCODER_SPECTRAL)
+        spectral_smooth_boundary(s, out, (int)n_out, sr);
+    else
+        s->spectral_sample_valid = 0;
     if (s->p.vocoder == SAM_VOCODER_PULSE) pulse_peak_control(out, n_out);
     emit(out, (int)n_out, cb, user);
     free(offs);

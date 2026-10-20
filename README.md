@@ -87,7 +87,8 @@ engine's decoded vowel or consonant excitation. It uses the stored formant envel
 timing to shape its own harmonic source and generated broadband consonant noise. The noise uses
 frame level metadata, but not the original decoded consonant waveform; its nominal level is boosted
 by 12 dB to keep consonants audible. Short cosine fades soften voiced/unvoiced transitions and the
-harmonic carrier continues through consonant noise. It does not run an LPC time-domain filter.
+harmonic carrier continues through consonant noise. A short sample-continuous correction smooths
+boundaries between acoustic units and silence. It does not run an LPC time-domain filter.
 All modes use the same voice file, unit selection, pitch and duration contours. The `bigvgan` option
 directly synthesizes a phase-continuous harmonic waveform shaped by the voice's formant envelope,
 without applying the time-domain LPC filter. A gentle harmonic spectral tilt retains vowel
