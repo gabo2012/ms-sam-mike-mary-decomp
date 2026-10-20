@@ -71,7 +71,17 @@ build\x64\sam_say.exe --data data\voice "Hello, my name is Microsoft Sam." out.w
 build\x64\sam_say.exe --data data\voice --voice Mike "Hello, I am Mike." out.wav      (Mike.spd + Mike.sdf)
 build\x64\sam_say.exe --data data\voice --voice Mary @story.txt out.wav              (read a UTF-8 file)
 build\x64\sam_say.exe --data data\voice --voice Mike --effect hall "Mike in Hall." out.wav
+build\x64\sam_say.exe --data data\voice --voice Mary --vocoder pulse "Mary in a new voice." out.wav
 ```
+
+### Swappable vocoder
+
+Every `.spd` voice can use either `--vocoder residual` (the default, preserving the original
+residual-excitation LPC synthesis) or `--vocoder pulse` (generated glottal pulses passed through the
+voice's decoded LPC filters). Both engines use the same voice file, unit selection, pitch, duration
+and amplitude contours; the pulse engine uses a differentiated Rosenberg glottal-flow pulse with a
+smooth return phase for voiced excitation, retaining decoded unvoiced excitation. Library users can select `"residual"` or `"pulse"` with
+`sam_tts_set_vocoder()`, or set `sam_params.vocoder` before creating a low-level synthesizer.
 
 ### SAPI 4 voice effects
 

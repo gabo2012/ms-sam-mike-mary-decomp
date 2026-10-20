@@ -507,6 +507,7 @@ void sam_params_default(sam_params *p)
     p->whisper = 0;
     p->monotone = 0;
     p->no_reverse = 0;
+    p->vocoder = SAM_VOCODER_RESIDUAL;
 }
 
 sam_synth *sam_synth_new(const sam_voice *v, const sam_params *p)
@@ -581,6 +582,32 @@ static void lpc_filter(sam_synth *s, const float *a, float *x, int n, float gain
         }
         mem[0] = acc;
         x[k] = (float)((double)gain * acc);
+    }
+}
+
+/* Replace a decoded voiced residual with a differentiated Rosenberg glottal pulse. */
+static void pulse_excitation(float *x, int n)
+{
+    const double open = 0.62;
+    double source_energy = 0.0, pulse_energy = 0.0;
+    int i;
+    for (i = 0; i < n; i++) source_energy += (double)x[i] * x[i];
+    for (i = 0; i < n; i++) {
+        double phase = (double)i / n;
+        double pulse;
+        if (phase < open)
+            pulse = 0.5 * 3.141592653589793 / open * sin(3.141592653589793 * phase / open);
+        else
+            pulse = -0.5 * 3.141592653589793 / (1.0 - open) *
+                    sin(3.141592653589793 * (phase - open) / (1.0 - open));
+        x[i] = (float)pulse;
+        pulse_energy += pulse * pulse;
+    }
+    if (source_energy > 0.0 && pulse_energy > 0.0) {
+        double scale = sqrt(source_energy / pulse_energy);
+        for (i = 0; i < n; i++) x[i] = (float)(x[i] * scale);
+    } else {
+        memset(x, 0, sizeof(float) * (size_t)n);
     }
 }
 
@@ -785,6 +812,8 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
         } else {
             fit_period(src, src_n, dst, n, v->window, v->fft_n);
         }
+        if (s->p.vocoder == SAM_VOCODER_PULSE && u.periods[f] > 0.0f)
+            pulse_excitation(dst, n);
         if (amp != 1.0f)
             for (i = 0; i < n; i++) dst[i] = (float)((double)amp * dst[i]);
         a = u.lpc + f * (u.order + 1);
