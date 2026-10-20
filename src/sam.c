@@ -45,6 +45,7 @@ struct sam_synth {
     int chunk_pos;       /* position inside the engine's output chunk */
     double bigvgan_phase; /* continuous phase for the harmonic/residual vocoder */
     double bigvgan_gain;  /* smoothed peak-control gain across frames and segments */
+    double spectral_gain; /* independent peak-control state for the additive vocoder */
     double spectral_f0;
     int spectral_f0_valid;
     int spectral_harmonics;
@@ -536,6 +537,7 @@ sam_synth *sam_synth_new(const sam_voice *v, const sam_params *p)
         return NULL;
     }
     s->bigvgan_gain = 1.0;
+    s->spectral_gain = 1.0;
     s->spectral_noise_state = 0x51f15e5du;
     return s;
 }
@@ -875,10 +877,9 @@ static void pulse_peak_control(float *x, size_t n)
     }
 }
 
-static void bigvgan_peak_control(sam_synth *s, float *x, int n)
+static void smooth_peak_control(double *state, float *x, int n, double sr, double release_seconds)
 {
     const double peak_limit = 30000.0;
-    const double sr = (double)(float)(s->p.out_rate > 0 ? s->p.out_rate : s->v->rate);
     double peak = 0.0, target = 1.0, attack, release, coeff, gain;
     int i;
     for (i = 0; i < n; i++) {
@@ -887,10 +888,10 @@ static void bigvgan_peak_control(sam_synth *s, float *x, int n)
     }
     if (peak > peak_limit) target = peak_limit / peak;
     attack = exp(-(double)n / (sr * 0.005));
-    release = exp(-(double)n / (sr * 0.08));
-    coeff = target < s->bigvgan_gain ? attack : release;
-    gain = target + coeff * (s->bigvgan_gain - target);
-    s->bigvgan_gain = gain;
+    release = exp(-(double)n / (sr * release_seconds));
+    coeff = target < *state ? attack : release;
+    gain = target + coeff * (*state - target);
+    *state = gain;
     for (i = 0; i < n; i++) x[i] = (float)(x[i] * gain);
 }
 
@@ -1139,13 +1140,15 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
                 bigvgan_render_frame(s, a, dst, n, s->p.gain);
             else if (s->p.gain != 1.0f)
                 for (i = 0; i < n; i++) dst[i] = (float)((double)dst[i] * s->p.gain);
-            bigvgan_peak_control(s, dst, n);
+            smooth_peak_control(&s->bigvgan_gain, dst, n,
+                                (double)(float)(s->p.out_rate > 0 ? s->p.out_rate : v->rate), 0.08);
         } else if (s->p.vocoder == SAM_VOCODER_SPECTRAL) {
             if (u.periods[f] > 0.0f)
                 spectral_render_frame(s, a, dst, n, s->p.gain, 1);
             else
-                spectral_render_noise(s, a, dst, n, s->p.gain * u.gains[f] * 0.02f);
-            bigvgan_peak_control(s, dst, n);
+                spectral_render_noise(s, a, dst, n, s->p.gain * u.gains[f] * 0.04f);
+            smooth_peak_control(&s->spectral_gain, dst, n,
+                                (double)(float)(s->p.out_rate > 0 ? s->p.out_rate : v->rate), 0.02);
         } else {
             lpc_filter(s, a, dst, n, s->p.gain);
         }

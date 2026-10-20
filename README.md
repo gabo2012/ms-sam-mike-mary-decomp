@@ -84,8 +84,8 @@ voiced residuals), `--vocoder bigvgan` (a lightweight DSP approximation using a 
 band-limited harmonic source), or `--vocoder spectral` (additive harmonic/noise synthesis from
 measured residual partials). The spectral mode uses independently weighted sinusoids for voiced
 frames and generated, spectrally shaped broadband noise for unvoiced consonant frames. The noise
-uses frame envelope and level metadata, but not the original decoded consonant waveform. It does
-not run an LPC time-domain filter.
+uses frame envelope and level metadata, but not the original decoded consonant waveform; its
+nominal level is boosted by 6 dB to keep consonants audible. It does not run an LPC time-domain filter.
 All modes use the same voice file, unit selection, pitch and duration contours. The `bigvgan` option
 directly synthesizes a phase-continuous harmonic waveform shaped by the voice's formant envelope,
 without applying the time-domain LPC filter. A gentle harmonic spectral tilt retains vowel
