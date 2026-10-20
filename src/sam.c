@@ -51,6 +51,11 @@ struct sam_synth {
     double spectral_phase[64];
     double spectral_amplitude[64];
     unsigned char spectral_phase_valid[64];
+    double spectral_noise_phase[128];
+    double spectral_noise_frequency[128];
+    double spectral_noise_amplitude[128];
+    unsigned char spectral_noise_valid;
+    unsigned spectral_noise_state;
     double svib_phase;   /* singing vibrato phase */
     /* vowel hold (singing): output samples -> source samples, piecewise linear */
     int w_on;
@@ -531,6 +536,7 @@ sam_synth *sam_synth_new(const sam_voice *v, const sam_params *p)
         return NULL;
     }
     s->bigvgan_gain = 1.0;
+    s->spectral_noise_state = 0x51f15e5du;
     return s;
 }
 
@@ -785,6 +791,71 @@ static void spectral_render_frame(sam_synth *s, const float *a, float *x, int n,
     }
     s->bigvgan_phase = phase;
     s->spectral_harmonics = harmonics;
+}
+
+static unsigned spectral_noise_random(sam_synth *s)
+{
+    s->spectral_noise_state = s->spectral_noise_state * 1664525u + 1013904223u;
+    return s->spectral_noise_state;
+}
+
+/* Generated broadband consonants, shaped by the frame envelope but not its decoded samples. */
+static void spectral_render_noise(sam_synth *s, const float *a, float *x, int n, float level)
+{
+    const double two_pi = 6.283185307179586;
+    const int count = 120;
+    double amplitude[128], energy = 0.0;
+    double sr = (double)(float)(s->p.out_rate > 0 ? s->p.out_rate : s->v->rate);
+    int i, k, j;
+    if (n <= 0) return;
+    if (!s->spectral_noise_valid) {
+        for (k = 0; k < count; k++) {
+            double jitter = ((spectral_noise_random(s) >> 8) / 16777216.0 - 0.5) * (sr / 256.0) * 0.8;
+            s->spectral_noise_frequency[k] = (k + 1) * sr / 256.0 + jitter;
+            s->spectral_noise_phase[k] = two_pi * ((spectral_noise_random(s) >> 8) / 16777216.0);
+        }
+        s->spectral_noise_valid = 1;
+    }
+    for (k = 0; k < count; k++) {
+        double freq = s->spectral_noise_frequency[k];
+        double omega = two_pi * freq / sr;
+        double re = 0.0, im = 0.0, den, taper = 1.0;
+        for (j = 0; j <= s->v->order; j++) {
+            re += (double)a[j] * cos(omega * j);
+            im -= (double)a[j] * sin(omega * j);
+        }
+        den = re * re + im * im;
+        if (freq > sr * 0.42) {
+            double fade = (sr * 0.5 - freq) / (sr * 0.08);
+            if (fade < 0.0) fade = 0.0;
+            taper = 0.5 - 0.5 * cos(3.141592653589793 * fade);
+        }
+        amplitude[k] = den > 1e-18 ? taper / sqrt(den) : 0.0;
+        energy += amplitude[k] * amplitude[k] * 0.5;
+    }
+    if (energy <= 0.0 || level == 0.0f) {
+        memset(x, 0, sizeof(float) * (size_t)n);
+        return;
+    }
+    {
+        double scale = fabs((double)level) / sqrt(energy);
+        for (k = 0; k < count; k++) {
+            amplitude[k] *= scale;
+            amplitude[k] = s->spectral_noise_amplitude[k] +
+                           (1.0 - exp(-(double)n / (sr * 0.004))) *
+                               (amplitude[k] - s->spectral_noise_amplitude[k]);
+            s->spectral_noise_amplitude[k] = amplitude[k];
+        }
+    }
+    for (i = 0; i < n; i++) {
+        double sample = 0.0;
+        for (k = 0; k < count; k++) {
+            sample += amplitude[k] * sin(s->spectral_noise_phase[k]);
+            s->spectral_noise_phase[k] += two_pi * s->spectral_noise_frequency[k] / sr;
+            if (s->spectral_noise_phase[k] >= two_pi) s->spectral_noise_phase[k] -= two_pi;
+        }
+        x[i] = (float)sample;
+    }
 }
 
 static void pulse_peak_control(float *x, size_t n)
@@ -1072,8 +1143,8 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
         } else if (s->p.vocoder == SAM_VOCODER_SPECTRAL) {
             if (u.periods[f] > 0.0f)
                 spectral_render_frame(s, a, dst, n, s->p.gain, 1);
-            else if (s->p.gain != 1.0f)
-                for (i = 0; i < n; i++) dst[i] = (float)((double)dst[i] * s->p.gain);
+            else
+                spectral_render_noise(s, a, dst, n, s->p.gain * u.gains[f] * 0.02f);
             bigvgan_peak_control(s, dst, n);
         } else {
             lpc_filter(s, a, dst, n, s->p.gain);
