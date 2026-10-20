@@ -105,6 +105,17 @@ Experiment knobs (not in the original engine):
 --rate 48000         run the vocoder at another sample rate (real 48 kHz synthesis, not resampling)
 ```
 
+### BigVGAN-inspired vocoder
+
+`--vocoder bigvgan-inspired` selects an optional native-C harmonic source/filter renderer.
+It builds a band-limited, phase-continuous harmonic excitation for voiced frames, blends in a
+small amount of the voice's recorded residual, and keeps the decoded LPC envelope and unvoiced
+noise. This mode needs no model files or runtime dependencies and is intended as an experimental,
+BigVGAN-inspired alternative; it is **not** the neural BigVGAN model and cannot reproduce its
+learned sound without trained weights. The default `--vocoder sam` keeps the original renderer.
+The same option is available in the `sam` CLI, and library hosts can select it with
+`sam_tts_set_vocoder(t, "bigvgan-inspired")`.
+
 ### Singing
 
 `--sing` treats the text as a score, one word per line: the word with syllables split by `-`, then a

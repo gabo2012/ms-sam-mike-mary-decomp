@@ -48,6 +48,7 @@ struct sam_synth {
     int w_on;
     double w_o0, w_o1, w_s0, w_s1, w_nat, w_hold;
     unsigned vib_state;  /* synth +0x80 */
+    double vocoder_phase;
     float *buf;          /* scratch output */
     size_t buf_cap;
 };
@@ -507,6 +508,7 @@ void sam_params_default(sam_params *p)
     p->whisper = 0;
     p->monotone = 0;
     p->no_reverse = 0;
+    p->vocoder = SAM_VOCODER_SAM;
 }
 
 sam_synth *sam_synth_new(const sam_voice *v, const sam_params *p)
@@ -582,6 +584,49 @@ static void lpc_filter(sam_synth *s, const float *a, float *x, int n, float gain
         mem[0] = acc;
         x[k] = (float)((double)gain * acc);
     }
+}
+
+static void bigvgan_inspired_source(sam_synth *s, const float *src, int src_n, float *dst, int n, int period)
+{
+    double weights[129], weight_sq = 0.0, source_sq = 0.0, output_sq = 0.0;
+    double phase = s->vocoder_phase, step, source_rms, output_rms, normalization;
+    int max_h, h, i;
+    if (period < 1 || src_n < 1) {
+        memset(dst, 0, sizeof(float) * (size_t)n);
+        return;
+    }
+    for (i = 0; i < src_n; i++) source_sq += (double)src[i] * src[i];
+    source_rms = sqrt(source_sq / src_n);
+    if (source_rms == 0.0) {
+        memset(dst, 0, sizeof(float) * (size_t)n);
+        return;
+    }
+    max_h = (int)(period * 0.48);
+    if (max_h > 128) max_h = 128;
+    if (max_h < 1) max_h = 1;
+    for (h = 1; h <= max_h; h++) {
+        weights[h] = pow((double)h, -0.7);
+        weight_sq += weights[h] * weights[h];
+    }
+    normalization = sqrt(2.0 / weight_sq);
+    step = 2.0 * 3.14159265358979323846 / period;
+    for (i = 0; i < n; i++) {
+        double harmonic = 0.0, residual;
+        int src_i = ((i % period) * src_n) / period;
+        for (h = 1; h <= max_h; h++) harmonic += weights[h] * sin(phase * h);
+        harmonic *= normalization;
+        residual = src[src_i] / source_rms;
+        dst[i] = (float)(0.9 * harmonic + 0.1 * residual);
+        phase += step;
+        if (phase >= 2.0 * 3.14159265358979323846) phase = fmod(phase, 2.0 * 3.14159265358979323846);
+        output_sq += (double)dst[i] * dst[i];
+    }
+    output_rms = n > 0 ? sqrt(output_sq / n) : 0.0;
+    if (output_rms > 0.0) {
+        double scale = source_rms / output_rms;
+        for (i = 0; i < n; i++) dst[i] = (float)(dst[i] * scale);
+    }
+    s->vocoder_phase = phase;
 }
 
 /* FUN_5ed42a8f: clip to [-32768, 32767], then float -> int16 by truncation */
@@ -706,6 +751,7 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
     if (g.unit == 0) { /* silence: zero samples, reset the filter */
         int n = (int)(sr * (double)g.dur);
         memset(s->mem, 0, sizeof(float) * (v->order + 1));
+        s->vocoder_phase = 0.0;
         out = scratch(s, (size_t)n + 1);
         if (!out) return -1;
         for (i = 0; i < n; i++) out[i] = 0.0f;
@@ -778,7 +824,9 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
         if (s->chunk_pos + n > CHUNK_GUARD) n = GUARD_PERIOD;
         amp = (float)knot_interp(&g, g.amp, (double)tsamp);
         /* Excitation_FetchPeriod (FUN_5ed42e40) */
-        if (rev[e]) {
+        if (s->p.vocoder == SAM_VOCODER_BIGVGAN_INSPIRED && u.periods[f] > 0.0f) {
+            bigvgan_inspired_source(s, src, src_n, dst, n, len[e]);
+        } else if (rev[e]) {
             for (i = 0; i < n; i++) dst[i] = src[n - 1 - i < src_n ? n - 1 - i : src_n - 1];
         } else if (src_n == n) {
             memcpy(dst, src, sizeof(float) * n);
@@ -807,7 +855,8 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
                 ai[0] = 1.0f;
                 a = ai;
                 /* crossfade the pulse shapes when both frames are voiced */
-                if (u.periods[f0] > 0 && u.periods[f0 + 1] > 0 && !rev[e]) {
+                if (s->p.vocoder != SAM_VOCODER_BIGVGAN_INSPIRED &&
+                    u.periods[f0] > 0 && u.periods[f0 + 1] > 0 && !rev[e]) {
                     int na = offs[f0 + 1] - offs[f0], nb = offs[f0 + 2] - offs[f0 + 1];
                     tmp = malloc(sizeof(float) * 2 * (size_t)(n > 0 ? n : 1));
                     if (tmp) {

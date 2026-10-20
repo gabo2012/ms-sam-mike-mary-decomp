@@ -2,6 +2,7 @@
  *
  * usage: sam_say [options] "text" out.wav      ("@file.txt" speaks a UTF-8 text file)
  *   --data DIR      folder containing Sam.spd, LTTS1033.LXA and r1033tts.LXA
+ *   --vocoder sam|bigvgan-inspired   select the default or experimental native renderer
  *   --pitch x --speed x --gain x --vibrato depth rate --no-reverse   (see sam.h)
  *   --reverse-units   play every sound unit backwards      --rate HZ   run the vocoder at another rate
  *   --sing            the text is a score: "twin-kle C4 1 C4 1" per line, "- 1" rest, "tempo 100"
@@ -79,6 +80,14 @@ int main(int argc, char **argv)
         if (!strcmp(argv[i], "--data") && i + 1 < argc) dir = argv[++i];
         else if (!strcmp(argv[i], "--voice") && i + 1 < argc) voice = argv[++i];
         else if (!strcmp(argv[i], "--effect") && i + 1 < argc) effect = argv[++i];
+        else if (!strcmp(argv[i], "--vocoder") && i + 1 < argc) {
+            const char *name = argv[++i];
+            if (!strcmp(name, "bigvgan-inspired")) p.vocoder = SAM_VOCODER_BIGVGAN_INSPIRED;
+            else if (strcmp(name, "sam")) {
+                fprintf(stderr, "sam_say: unknown vocoder %s (sam or bigvgan-inspired)\n", name);
+                return 1;
+            }
+        }
         else if (!strcmp(argv[i], "--no-trim")) no_trim = 1; /* original RoboSoft loudness (clips) */
         else if (!strcmp(argv[i], "--pitch") && i + 1 < argc) p.pitch_scale = (float)atof(argv[++i]);
         else if (!strcmp(argv[i], "--speed") && i + 1 < argc) p.speed = (float)atof(argv[++i]);
@@ -127,7 +136,7 @@ int main(int argc, char **argv)
         if ((unsigned char)text[0] == 0xef && (unsigned char)text[1] == 0xbb && (unsigned char)text[2] == 0xbf) text += 3;
     }
     if (!text || !out) {
-        fprintf(stderr, "usage: sam_say [--data DIR] [--pitch x] [--speed x] [--gain x] [--vibrato d r] \"text\" out.wav\n");
+        fprintf(stderr, "usage: sam_say [--data DIR] [--vocoder sam|bigvgan-inspired] [--pitch x] [--speed x] [--gain x] [--vibrato d r] \"text\" out.wav\n");
         return 1;
     }
 #ifdef SAM_EMBEDDED

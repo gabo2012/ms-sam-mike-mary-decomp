@@ -19,6 +19,11 @@ extern "C" {
 
 #define SAM_MAX_KNOTS 20
 
+enum {
+    SAM_VOCODER_SAM = 0,
+    SAM_VOCODER_BIGVGAN_INSPIRED = 1
+};
+
 typedef struct sam_voice sam_voice;
 typedef struct sam_synth sam_synth;
 
@@ -50,6 +55,7 @@ typedef struct {
     float base_pitch;    /* the voice's base pitch in Hz, from its .sdf (Sam 100, Mike 110, Mary 189) */
     int whisper;         /* SAPI 4 Whisper: every frame gets noise excitation */
     int monotone;        /* SAPI 4 RoboSoft: every pitch point = the base pitch */
+    int vocoder;         /* SAM_VOCODER_*; default preserves the original LPC renderer */
 } sam_params;
 
 void sam_params_default(sam_params *p);
