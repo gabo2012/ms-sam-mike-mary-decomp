@@ -1130,7 +1130,7 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
             if (u.periods[f] > 0.0f)
                 spectral_render_frame(s, a, dst, n, s->p.gain, 1);
             else
-                spectral_render_noise(s, a, dst, n, s->p.gain * u.gains[f] * 0.04f);
+                spectral_render_noise(s, a, dst, n, s->p.gain * u.gains[f] * 0.08f);
             smooth_peak_control(&s->spectral_gain, dst, n,
                                 (double)(float)(s->p.out_rate > 0 ? s->p.out_rate : v->rate), 0.02);
         } else {
