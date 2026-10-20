@@ -75,6 +75,8 @@ sam_synth *sam_synth_new(const sam_voice *v, const sam_params *p);
 void sam_synth_free(sam_synth *s);
 /* Render one segment. Returns 0 on success. */
 int sam_synth_segment(sam_synth *s, const sam_segment *seg, sam_pcm_cb cb, void *user);
+/* Render one unit at its stored pitch periods and native duration, without pitch/time warping. */
+int sam_synth_unit_raw(sam_synth *s, int unit, sam_pcm_cb cb, void *user);
 
 /* ---- text to speech ---- */
 

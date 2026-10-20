@@ -676,6 +676,41 @@ static void emit(const float *x, int n, sam_pcm_cb cb, void *user)
     }
 }
 
+int sam_synth_unit_raw(sam_synth *s, int index, sam_pcm_cb cb, void *user)
+{
+    const sam_voice *v;
+    sam_unit u;
+    float *out;
+    int frame, pos = 0, rc = -1;
+    if (!s || !cb) return -1;
+    v = s->v;
+    if (unit_decode(v, index, &s->noise_pos, &u, s->p.whisper) != 0) return -1;
+    out = scratch(s, (size_t)u.total + 1);
+    if (!out) goto done;
+    for (frame = 0; frame < u.nframes; frame++) {
+        int n = (int)fabsf(u.periods[frame]);
+        float *dst = out + pos;
+        if (s->p.vocoder == SAM_VOCODER_BIGVGAN_INSPIRED && u.periods[frame] > 0.0f)
+            bigvgan_inspired_source(s, u.exc + pos, n, dst, n, n);
+        else
+            memcpy(dst, u.exc + pos, sizeof(float) * (size_t)n);
+        lpc_filter(s, u.lpc + frame * (u.order + 1), dst, n, s->p.gain);
+        if (s->p.vocoder == SAM_VOCODER_BIGVGAN_INSPIRED) limit_bigvgan_output(s, dst, n, v->rate);
+        pos += n;
+    }
+    if (s->p.reverse_units)
+        for (frame = 0; frame < pos / 2; frame++) {
+            float tmp = out[frame];
+            out[frame] = out[pos - 1 - frame];
+            out[pos - 1 - frame] = tmp;
+        }
+    emit(out, pos, cb, user);
+    rc = 0;
+done:
+    sam_unit_free(&u);
+    return rc;
+}
+
 /* PitchMarks_Place (FUN_5ed42bda): choose a source frame and an output period for every epoch. */
 
 /* source position (unit samples) at output sample o, for a held vowel */

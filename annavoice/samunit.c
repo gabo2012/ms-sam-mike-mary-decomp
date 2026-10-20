@@ -9,7 +9,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
 
 #include "sam.h"
 
@@ -23,39 +22,6 @@ typedef struct {
     FILE *f;
     unsigned n;
 } sink;
-
-static int render_raw(sam_voice *v, int unit, sink *s)
-{
-    sam_unit u;
-    float *mem;
-    int noise_pos = 0, f, pos = 0;
-    if (sam_unit_decode(v, unit, &noise_pos, &u) != 0) return -1;
-    mem = calloc((size_t)u.order + 1, sizeof(float));
-    if (!mem) {
-        sam_unit_free(&u);
-        return -1;
-    }
-    for (f = 0; f < u.nframes; f++) {
-        int n = (int)fabsf(u.periods[f]), k, i;
-        const float *a = u.lpc + f * (u.order + 1);
-        for (k = 0; k < n; k++) {
-            float sample = a[0] * u.exc[pos + k];
-            for (i = u.order; i > 0; i--) {
-                sample = (float)((double)sample - (double)mem[i] * a[i]);
-                mem[i] = i > 1 ? mem[i - 1] : sample;
-            }
-            mem[0] = sample;
-            if (sample > 32767.0f) sample = 32767.0f;
-            else if (sample < -32768.0f) sample = -32768.0f;
-            put(s->f, (uint16_t)(int16_t)(long)sample, 2);
-        }
-        pos += n;
-        s->n += (unsigned)n;
-    }
-    free(mem);
-    sam_unit_free(&u);
-    return 0;
-}
 
 static void on_pcm(const int16_t *pcm, size_t n, void *user)
 {
@@ -110,10 +76,19 @@ int main(int argc, char **argv)
         return 1;
     }
     sam_params_default(&p);
+    if (raw || all) p.vocoder = SAM_VOCODER_BIGVGAN_INSPIRED;
+    sy = sam_synth_new(v, &p);
+    if (!sy) {
+        fprintf(stderr, "samunit: out of memory\n");
+        sam_voice_free(v);
+        return 1;
+    }
     s.f = fopen(argv[3], "wb");
     s.n = 0;
     if (!s.f) {
         fprintf(stderr, "cannot write %s\n", argv[3]);
+        sam_synth_free(sy);
+        sam_voice_free(v);
         return 1;
     }
     fwrite("RIFF\0\0\0\0WAVEfmt ", 1, 16, s.f);
@@ -124,9 +99,10 @@ int main(int argc, char **argv)
         int first = all ? 0 : unit;
         int end = all ? sam_voice_units(v) : unit + 1;
         for (unit = first; unit < end; unit++) {
-            if (render_raw(v, unit, &s)) {
+            if (sam_synth_unit_raw(sy, unit, on_pcm, &s)) {
                 fprintf(stderr, "samunit: raw render failed for unit %d\n", unit);
                 fclose(s.f);
+                sam_synth_free(sy);
                 sam_voice_free(v);
                 return 1;
             }
@@ -134,17 +110,11 @@ int main(int argc, char **argv)
         if (s.n == 0) {
             fprintf(stderr, "samunit: no unit samples were rendered\n");
             fclose(s.f);
+            sam_synth_free(sy);
             sam_voice_free(v);
             return 1;
         }
     } else {
-        sy = sam_synth_new(v, &p);
-        if (!sy) {
-            fprintf(stderr, "samunit: out of memory\n");
-            fclose(s.f);
-            sam_voice_free(v);
-            return 1;
-        }
         memset(&seg, 0, sizeof seg);
         seg.unit = unit;
         seg.dur = (float)(dur / 1000.0);
@@ -160,13 +130,13 @@ int main(int argc, char **argv)
             sam_voice_free(v);
             return 1;
         }
-        sam_synth_free(sy);
     }
     fseek(s.f, 4, SEEK_SET);
     put(s.f, 36 + s.n * 2, 4);
     fseek(s.f, 40, SEEK_SET);
     put(s.f, s.n * 2, 4);
     fclose(s.f);
+    sam_synth_free(sy);
     if (all)
         printf("%s: all %d units, %u samples at %d Hz (raw pitch and native speed)\n", argv[3],
                sam_voice_units(v), s.n, sam_voice_rate(v));
