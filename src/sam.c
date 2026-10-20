@@ -711,7 +711,7 @@ static void spectral_render_frame(sam_synth *s, const float *a, float *x, int n,
     }
     target_f0 = s->spectral_f0;
     max_f0 = start_f0 > target_f0 ? start_f0 : target_f0;
-    harmonics = (int)(sr * 0.32 / max_f0);
+    harmonics = (int)(sr * 0.4 / max_f0);
     if (harmonics > 64) harmonics = 64;
     if (harmonics < 1) {
         memset(x, 0, sizeof(float) * (size_t)n);
@@ -748,9 +748,14 @@ static void spectral_render_frame(sam_synth *s, const float *a, float *x, int n,
             delta = atan2(sin(delta), cos(delta));
             s->spectral_phase[k - 1] += phase_smoothing * delta;
         }
-        if (harmonics >= 8 && k > harmonics - 8) {
-            double fade = (double)(harmonics - k) / 8.0;
-            amplitude[k - 1] *= 0.5 - 0.5 * cos(3.141592653589793 * fade);
+        {
+            double frequency = k * max_f0;
+            const double fade_start = sr * 0.24, fade_end = sr * 0.4;
+            if (frequency > fade_start) {
+                double fade = (fade_end - frequency) / (fade_end - fade_start);
+                if (fade < 0.0) fade = 0.0;
+                amplitude[k - 1] *= 0.5 - 0.5 * cos(3.141592653589793 * fade);
+            }
         }
         start_amplitude[k - 1] = s->spectral_amplitude[k - 1];
         s->spectral_amplitude[k - 1] = amplitude[k - 1];

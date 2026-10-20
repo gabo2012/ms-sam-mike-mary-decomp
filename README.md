@@ -91,8 +91,9 @@ brightness, while a conservative Nyquist margin and smooth harmonic taper reduce
 inspired by neural vocoders' harmonic-rich, anti-aliased
 output, but is not the BigVGAN neural model and does not load its weights. The spectral mode uses
 the voice's stored LPC envelope as spectral data, but synthesizes by additive sinusoidal resynthesis
-rather than LPC filtering. Its partials stay below 64% of Nyquist (using the highest pitch during a
-transition), taper smoothly near the cutoff, and interpolate pitch and amplitude across frames.
+rather than LPC filtering. Its partials stay below 80% of Nyquist (using the highest pitch during a
+transition) and receive a broad, frequency-based cosine roll-off above 48% of Nyquist for smoother
+high frequencies. Pitch and amplitude are interpolated across frames.
 Pitch phase is carried continuously across acoustic units to reduce aliasing and clicks at pitch and
 unit boundaries. Generated modes reduce
 peaks only when needed; gain reduction is smoothed across frames and segments to avoid audible level
