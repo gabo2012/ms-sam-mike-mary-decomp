@@ -74,6 +74,7 @@ build\x64\sam_say.exe --data data\voice --voice Mike --effect hall "Mike in Hall
 build\x64\sam_say.exe --data data\voice --voice Mary --vocoder pulse "Mary in a new voice." out.wav
 build\x64\sam_say.exe --data data\voice --voice Sam --vocoder bigvgan "Sam with harmonic excitation." out.wav
 build\x64\sam_say.exe --data data\voice --voice Sam --vocoder spectral "Sam with additive synthesis." out.wav
+build\x64\sam_say.exe --data data\voice --voice Sam --vocoder bigvgan-concat "Sam with normalized units." out.wav
 ```
 
 ### Swappable vocoder
@@ -89,6 +90,12 @@ frame level metadata, but not the original decoded consonant waveform; its nomin
 by 12 dB to keep consonants audible. Short cosine fades soften voiced/unvoiced transitions and the
 harmonic carrier continues through consonant noise. A short sample-continuous correction smooths
 boundaries between acoustic units and silence. It does not run an LPC time-domain filter.
+The separate `--vocoder bigvgan-concat` mode is a lightweight BigVGAN-inspired concatenative
+renderer: it keeps the front end's selected units and frame timing, extracts harmonic magnitudes
+from each selected voiced unit's decoded pulse spectrum, and synthesizes a phase-continuous,
+band-limited harmonic source. Unvoiced portions use their selected unit excitation directly. It
+does not use LPC coefficients or the LPC filter, and normalizes each rendered unit to a common RMS
+target before peak control. It is DSP, not the BigVGAN neural model, and uses no pretrained weights.
 All modes use the same voice file, unit selection, pitch and duration contours. The `bigvgan` option
 directly synthesizes a phase-continuous harmonic waveform shaped by the voice's formant envelope,
 without applying the time-domain LPC filter. A gentle harmonic spectral tilt retains vowel
@@ -102,7 +109,8 @@ harmonics while smoothly fading near the cutoff. Pitch and amplitude are interpo
 Pitch phase is carried continuously across acoustic units to reduce aliasing and clicks at pitch and
 unit boundaries. Generated modes reduce
 peaks only when needed; gain reduction is smoothed across frames and segments to avoid audible level
-jumps. Library users can select `"residual"`, `"pulse"`, `"bigvgan"` or `"spectral"` with
+jumps. Library users can select `"residual"`, `"pulse"`, `"bigvgan"`, `"spectral"` or
+`"bigvgan-concat"` with
 `sam_tts_set_vocoder()`, or set `sam_params.vocoder` before creating a low-level synthesizer.
 
 ### SAPI 4 voice effects

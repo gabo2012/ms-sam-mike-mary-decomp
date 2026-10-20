@@ -82,7 +82,8 @@ SAM_API void sam_tts_set_pitch(sam_speech *t, int pitch);
  * unknown name (the effect is then left alone). */
 SAM_API int sam_tts_set_effect(sam_speech *t, const char *name);
 
-/* Select the excitation engine: "residual" (default), "pulse", lightweight "bigvgan", or "spectral".
+/* Select the excitation engine: "residual" (default), "pulse", "bigvgan", "spectral", or
+ * "bigvgan-concat" (non-LPC harmonic resynthesis from normalized selected units).
  * Returns 0, or -1 for an unknown name. */
 SAM_API int sam_tts_set_vocoder(sam_speech *t, const char *name);
 
