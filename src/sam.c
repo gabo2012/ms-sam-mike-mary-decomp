@@ -597,7 +597,7 @@ static double rosenberg_pulse(int i, int n)
 /* Blend a glottal pulse with the decoded residual to preserve its high-frequency detail. */
 static void pulse_excitation(float *x, int n)
 {
-    const double pulse_mix = 0.35;
+    const double pulse_mix = 0.15;
     double source_energy = 0.0, pulse_energy = 0.0, mixed_energy = 0.0;
     int i;
     for (i = 0; i < n; i++) source_energy += (double)x[i] * x[i];
@@ -621,14 +621,20 @@ static void pulse_excitation(float *x, int n)
     }
 }
 
-static void pulse_limit(float *x, size_t n)
+static void pulse_peak_control(float *x, size_t n)
 {
-    const double knee = 23000.0, headroom = 9000.0;
+    const double peak_limit = 30000.0;
+    double peak = 0.0;
     size_t i;
     for (i = 0; i < n; i++) {
         double mag = fabs((double)x[i]);
-        if (mag > knee)
-            x[i] = (float)copysign(knee + headroom * tanh((mag - knee) / headroom), x[i]);
+        if (mag > peak) peak = mag;
+    }
+    if (peak > peak_limit) {
+        double scale = peak_limit / peak;
+        for (i = 0; i < n; i++) {
+            x[i] = (float)(x[i] * scale);
+        }
     }
 }
 
@@ -884,7 +890,7 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
             out[i] = out[n_out - 1 - i];
             out[n_out - 1 - i] = tmp;
         }
-    if (s->p.vocoder == SAM_VOCODER_PULSE) pulse_limit(out, n_out);
+    if (s->p.vocoder == SAM_VOCODER_PULSE) pulse_peak_control(out, n_out);
     emit(out, (int)n_out, cb, user);
     free(offs);
     free(frame);

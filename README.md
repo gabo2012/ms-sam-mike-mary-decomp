@@ -79,8 +79,10 @@ build\x64\sam_say.exe --data data\voice --voice Mary --vocoder pulse "Mary in a 
 Every `.spd` voice can use either `--vocoder residual` (the default, preserving the original
 residual-excitation LPC synthesis) or `--vocoder pulse` (generated glottal pulses passed through the
 voice's decoded LPC filters). Both engines use the same voice file, unit selection, pitch, duration
-and amplitude contours; the pulse engine blends a differentiated Rosenberg glottal pulse with the
-decoded voiced residual, retaining its high-frequency detail as well as decoded unvoiced excitation.
+and amplitude contours; the pulse engine subtly blends a differentiated Rosenberg glottal pulse with
+the decoded voiced residual, retaining its high-frequency detail as well as decoded unvoiced
+excitation. It applies transparent per-segment gain reduction only when needed to keep peaks below
+clipping, without nonlinear peak distortion.
 Library users can select `"residual"` or `"pulse"` with
 `sam_tts_set_vocoder()`, or set `sam_params.vocoder` before creating a low-level synthesizer.
 
