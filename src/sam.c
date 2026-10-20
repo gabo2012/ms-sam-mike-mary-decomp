@@ -621,6 +621,17 @@ static void pulse_excitation(float *x, int n)
     }
 }
 
+static void pulse_limit(float *x, size_t n)
+{
+    const double knee = 23000.0, headroom = 9000.0;
+    size_t i;
+    for (i = 0; i < n; i++) {
+        double mag = fabs((double)x[i]);
+        if (mag > knee)
+            x[i] = (float)copysign(knee + headroom * tanh((mag - knee) / headroom), x[i]);
+    }
+}
+
 /* FUN_5ed42a8f: clip to [-32768, 32767], then float -> int16 by truncation */
 static int16_t to_pcm(float x)
 {
@@ -873,6 +884,7 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
             out[i] = out[n_out - 1 - i];
             out[n_out - 1 - i] = tmp;
         }
+    if (s->p.vocoder == SAM_VOCODER_PULSE) pulse_limit(out, n_out);
     emit(out, (int)n_out, cb, user);
     free(offs);
     free(frame);
