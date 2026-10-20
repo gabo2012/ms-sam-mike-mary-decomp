@@ -7,7 +7,7 @@
  * 3. word / sentence / bookmark events are in order, inside the text, and their audio positions
  *    never run past the audio that has been delivered
  * 4. two handles opened the same way render the same text identically
- * 5. the pulse vocoder can be selected and produces distinct audio from the same voice
+ * 5. alternate vocoders can be selected and produce distinct audio from the same voice
  *
  * Note: one handle does not repeat itself exactly. The engine's accent prominences come from the CRT
  * rand(), whose state runs on from one Speak() to the next, as it does in the original spttseng.dll;
@@ -175,6 +175,17 @@ int main(int argc, char **argv)
             check(rc == 0 && pulse.pcm && pulse.samples == full &&
                       memcmp(c.pcm, pulse.pcm, (size_t)full * sizeof *pulse.pcm) != 0,
                   "the pulse vocoder renders existing voice data with distinct audio");
+            if (pulse.pcm) {
+                check(sam_tts_set_vocoder(t2, "bigvgan") == 0,
+                      "the BigVGAN-inspired vocoder can be selected on an open handle");
+                pulse.samples = 0;
+                memset(pulse.pcm, 0, (size_t)pulse.ncap * sizeof *pulse.pcm);
+                cb.user = &pulse;
+                rc = sam_tts_speak(t2, LONG_TEXT, 0, &cb);
+                check(rc == 0 && pulse.samples == full &&
+                          memcmp(c.pcm, pulse.pcm, (size_t)full * sizeof *pulse.pcm) != 0,
+                      "the BigVGAN-inspired vocoder renders existing voice data");
+            }
             check(sam_tts_set_vocoder(t2, "unknown") == -1,
                   "an unknown vocoder name is rejected");
             rc = sam_tts_set_vocoder(t2, "residual");

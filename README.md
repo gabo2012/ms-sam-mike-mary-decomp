@@ -72,18 +72,19 @@ build\x64\sam_say.exe --data data\voice --voice Mike "Hello, I am Mike." out.wav
 build\x64\sam_say.exe --data data\voice --voice Mary @story.txt out.wav              (read a UTF-8 file)
 build\x64\sam_say.exe --data data\voice --voice Mike --effect hall "Mike in Hall." out.wav
 build\x64\sam_say.exe --data data\voice --voice Mary --vocoder pulse "Mary in a new voice." out.wav
+build\x64\sam_say.exe --data data\voice --voice Sam --vocoder bigvgan "Sam with harmonic excitation." out.wav
 ```
 
 ### Swappable vocoder
 
-Every `.spd` voice can use either `--vocoder residual` (the default, preserving the original
-residual-excitation LPC synthesis) or `--vocoder pulse` (generated glottal pulses passed through the
-voice's decoded LPC filters). Both engines use the same voice file, unit selection, pitch, duration
-and amplitude contours; the pulse engine subtly blends a differentiated Rosenberg glottal pulse with
-the decoded voiced residual, retaining its high-frequency detail as well as decoded unvoiced
-excitation. It applies transparent per-segment gain reduction only when needed to keep peaks below
-clipping, without nonlinear peak distortion.
-Library users can select `"residual"` or `"pulse"` with
+Every `.spd` voice can use `--vocoder residual` (the default, preserving the original
+residual-excitation LPC synthesis), `--vocoder pulse` (generated glottal pulses mixed with decoded
+voiced residuals), or `--vocoder bigvgan` (a lightweight DSP approximation using a phase-continuous,
+band-limited harmonic source mixed with a small amount of decoded residual detail). All three use
+the same voice file, unit selection, LPC filters, pitch and duration contours. The `bigvgan` option
+is inspired by neural vocoders' harmonic-rich, anti-aliased output, but is not the BigVGAN neural
+model and does not load its weights. Generated-excitation modes apply per-segment gain reduction
+only when needed to avoid clipping. Library users can select `"residual"`, `"pulse"` or `"bigvgan"` with
 `sam_tts_set_vocoder()`, or set `sam_params.vocoder` before creating a low-level synthesizer.
 
 ### SAPI 4 voice effects

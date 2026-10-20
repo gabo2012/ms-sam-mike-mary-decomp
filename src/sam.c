@@ -43,6 +43,7 @@ struct sam_synth {
     float *mem;          /* LPC filter state [order+1] */
     int noise_pos;       /* voice +0x78 */
     int chunk_pos;       /* position inside the engine's output chunk */
+    double bigvgan_phase; /* continuous phase for the harmonic/residual vocoder */
     double svib_phase;   /* singing vibrato phase */
     /* vowel hold (singing): output samples -> source samples, piecewise linear */
     int w_on;
@@ -621,6 +622,69 @@ static void pulse_excitation(float *x, int n)
     }
 }
 
+static double bigvgan_harmonic(double phase, const double *weights, int harmonics)
+{
+    double sample = 0.0;
+    int k;
+    for (k = 1; k <= harmonics; k++)
+        sample += weights[k - 1] * sin(6.283185307179586 * k * phase);
+    return sample;
+}
+
+/* Band-limited harmonic source with a small decoded-residual component for natural detail. */
+static void bigvgan_excitation(sam_synth *s, float *x, int n)
+{
+    const double residual_mix = 0.2;
+    double source_energy = 0.0, harmonic_energy = 0.0, mixed_energy = 0.0, phase = s->bigvgan_phase;
+    int harmonics = n / 2 - 1, i;
+    double weights[64];
+    int k;
+    if (harmonics > 64) harmonics = 64;
+    for (i = 0; i < n; i++) source_energy += (double)x[i] * x[i];
+    if (harmonics < 1 || source_energy <= 0.0) {
+        memset(x, 0, sizeof(float) * (size_t)n);
+        return;
+    }
+    for (k = 1; k <= harmonics; k++) {
+        double weight = 1.0 / sqrt((double)k);
+        if (harmonics >= 4 && k > harmonics - 4) {
+            double fade = (double)(harmonics - k) / 4.0;
+            weight *= 0.5 - 0.5 * cos(3.141592653589793 * fade);
+        }
+        weights[k - 1] = weight;
+    }
+    for (i = 0; i < n; i++) {
+        double sample = bigvgan_harmonic(phase, weights, harmonics);
+        harmonic_energy += sample * sample;
+        phase += 1.0 / n;
+        if (phase >= 1.0) phase -= 1.0;
+    }
+    if (harmonic_energy <= 0.0) {
+        memset(x, 0, sizeof(float) * (size_t)n);
+        return;
+    }
+    {
+        double harmonic_scale = sqrt(source_energy / harmonic_energy);
+        phase = s->bigvgan_phase;
+        for (i = 0; i < n; i++) {
+            double sample = bigvgan_harmonic(phase, weights, harmonics);
+            {
+                double mixed = (1.0 - residual_mix) * sample * harmonic_scale +
+                               residual_mix * x[i];
+                x[i] = (float)mixed;
+                mixed_energy += mixed * mixed;
+            }
+            phase += 1.0 / n;
+            if (phase >= 1.0) phase -= 1.0;
+        }
+    }
+    s->bigvgan_phase = phase;
+    if (mixed_energy > 0.0) {
+        double scale = sqrt(source_energy / mixed_energy);
+        for (i = 0; i < n; i++) x[i] = (float)(x[i] * scale);
+    }
+}
+
 static void pulse_peak_control(float *x, size_t n)
 {
     const double peak_limit = 30000.0;
@@ -841,6 +905,8 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
         }
         if (s->p.vocoder == SAM_VOCODER_PULSE && u.periods[f] > 0.0f)
             pulse_excitation(dst, n);
+        else if (s->p.vocoder == SAM_VOCODER_BIGVGAN && u.periods[f] > 0.0f)
+            bigvgan_excitation(s, dst, n);
         if (amp != 1.0f)
             for (i = 0; i < n; i++) dst[i] = (float)((double)amp * dst[i]);
         a = u.lpc + f * (u.order + 1);
@@ -890,7 +956,7 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
             out[i] = out[n_out - 1 - i];
             out[n_out - 1 - i] = tmp;
         }
-    if (s->p.vocoder == SAM_VOCODER_PULSE) pulse_peak_control(out, n_out);
+    if (s->p.vocoder != SAM_VOCODER_RESIDUAL) pulse_peak_control(out, n_out);
     emit(out, (int)n_out, cb, user);
     free(offs);
     free(frame);

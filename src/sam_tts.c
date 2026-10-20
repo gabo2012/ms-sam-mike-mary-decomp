@@ -128,6 +128,7 @@ int sam_tts_set_vocoder(sam_speech *t, const char *name)
     if (!t || !name) return -1;
     if (!strcmp(name, "residual")) vocoder = SAM_VOCODER_RESIDUAL;
     else if (!strcmp(name, "pulse")) vocoder = SAM_VOCODER_PULSE;
+    else if (!strcmp(name, "bigvgan")) vocoder = SAM_VOCODER_BIGVGAN;
     else return -1;
     if (vocoder == t->p.vocoder) return 0;
     t->p.vocoder = vocoder;
