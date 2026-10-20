@@ -44,6 +44,7 @@ struct sam_synth {
     int noise_pos;       /* voice +0x78 */
     int chunk_pos;       /* position inside the engine's output chunk */
     double bigvgan_phase; /* continuous phase for the harmonic/residual vocoder */
+    double bigvgan_gain;  /* smoothed peak-control gain across frames and segments */
     double svib_phase;   /* singing vibrato phase */
     /* vowel hold (singing): output samples -> source samples, piecewise linear */
     int w_on;
@@ -523,6 +524,7 @@ sam_synth *sam_synth_new(const sam_voice *v, const sam_params *p)
         free(s);
         return NULL;
     }
+    s->bigvgan_gain = 1.0;
     return s;
 }
 
@@ -697,6 +699,25 @@ static void pulse_peak_control(float *x, size_t n)
             x[i] = (float)(x[i] * scale);
         }
     }
+}
+
+static void bigvgan_peak_control(sam_synth *s, float *x, int n)
+{
+    const double peak_limit = 30000.0;
+    const double sr = (double)(float)(s->p.out_rate > 0 ? s->p.out_rate : s->v->rate);
+    double peak = 0.0, target = 1.0, attack, release, coeff, gain;
+    int i;
+    for (i = 0; i < n; i++) {
+        double mag = fabs((double)x[i]);
+        if (mag > peak) peak = mag;
+    }
+    if (peak > peak_limit) target = peak_limit / peak;
+    attack = exp(-(double)n / (sr * 0.005));
+    release = exp(-(double)n / (sr * 0.08));
+    coeff = target < s->bigvgan_gain ? attack : release;
+    gain = target + coeff * (s->bigvgan_gain - target);
+    s->bigvgan_gain = gain;
+    for (i = 0; i < n; i++) x[i] = (float)(x[i] * gain);
 }
 
 /* FUN_5ed42a8f: clip to [-32768, 32767], then float -> int16 by truncation */
@@ -944,6 +965,7 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
                 bigvgan_render_frame(s, a, dst, n, s->p.gain);
             else if (s->p.gain != 1.0f)
                 for (i = 0; i < n; i++) dst[i] = (float)((double)dst[i] * s->p.gain);
+            bigvgan_peak_control(s, dst, n);
         } else {
             lpc_filter(s, a, dst, n, s->p.gain);
         }
@@ -958,7 +980,7 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
             out[i] = out[n_out - 1 - i];
             out[n_out - 1 - i] = tmp;
         }
-    if (s->p.vocoder != SAM_VOCODER_RESIDUAL) pulse_peak_control(out, n_out);
+    if (s->p.vocoder == SAM_VOCODER_PULSE) pulse_peak_control(out, n_out);
     emit(out, (int)n_out, cb, user);
     free(offs);
     free(frame);

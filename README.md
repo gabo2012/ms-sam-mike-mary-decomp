@@ -85,9 +85,9 @@ the same voice file, unit selection, LPC filters, pitch and duration contours. T
 directly synthesizes a phase-continuous harmonic waveform shaped by the voice's formant envelope,
 without applying the time-domain LPC filter. It uses a conservative Nyquist margin and smooth
 harmonic taper to reduce aliasing. It is inspired by neural vocoders' harmonic-rich, anti-aliased
-output, but is not the BigVGAN neural model and does not load its weights. Generated-excitation
-modes apply per-segment gain reduction
-only when needed to avoid clipping. Library users can select `"residual"`, `"pulse"` or `"bigvgan"` with
+output, but is not the BigVGAN neural model and does not load its weights. Generated modes reduce
+peaks only when needed; BigVGAN's gain reduction is smoothed across frames and segments to avoid
+audible level jumps. Library users can select `"residual"`, `"pulse"` or `"bigvgan"` with
 `sam_tts_set_vocoder()`, or set `sam_params.vocoder` before creating a low-level synthesizer.
 
 ### SAPI 4 voice effects
