@@ -669,6 +669,14 @@ static void filter_bigvgan_unvoiced(sam_synth *s, float *x, int n, double sr)
     }
 }
 
+static void attenuate_bigvgan_unvoiced(sam_synth *s, float *x, int n)
+{
+    const float gain = 0.5f;
+    int i;
+    for (i = 0; i < n; i++) x[i] *= gain;
+    for (i = 0; i <= s->v->order; i++) s->mem[i] *= gain;
+}
+
 /* FUN_5ed42a8f: clip to [-32768, 32767], then float -> int16 by truncation */
 static int16_t to_pcm(float x)
 {
@@ -708,7 +716,10 @@ int sam_synth_unit_raw(sam_synth *s, int index, sam_pcm_cb cb, void *user)
             memcpy(dst, u.exc + pos, sizeof(float) * (size_t)n);
         lpc_filter(s, u.lpc + frame * (u.order + 1), dst, n, s->p.gain);
         if (s->p.vocoder == SAM_VOCODER_BIGVGAN_INSPIRED) {
-            if (u.periods[frame] <= 0.0f) filter_bigvgan_unvoiced(s, dst, n, v->rate);
+            if (u.periods[frame] <= 0.0f) {
+                filter_bigvgan_unvoiced(s, dst, n, v->rate);
+                attenuate_bigvgan_unvoiced(s, dst, n);
+            }
             else s->unvoiced_lp = 0.0f;
             limit_bigvgan_output(s, dst, n, v->rate);
         }
@@ -953,7 +964,10 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
         }
         lpc_filter(s, a, dst, n, s->p.gain);
         if (s->p.vocoder == SAM_VOCODER_BIGVGAN_INSPIRED) {
-            if (u.periods[f] <= 0.0f) filter_bigvgan_unvoiced(s, dst, n, sr);
+            if (u.periods[f] <= 0.0f) {
+                filter_bigvgan_unvoiced(s, dst, n, sr);
+                attenuate_bigvgan_unvoiced(s, dst, n);
+            }
             else s->unvoiced_lp = 0.0f;
             limit_bigvgan_output(s, dst, n, sr);
         }
