@@ -91,8 +91,9 @@ and the missing high band were both found. Against real Anna saying the same sen
 | magnitude averaging, envelope averaging, stress-aware vowels | 5.28 | 9.8 dB |
 | *real Anna* | — | 6.6 dB |
 
-`samunit.exe` renders a single unit at a chosen pitch and length, which is how you tell whether a problem
-is in one unit's encoding or in the joins between units.
+`samunit.exe Sam.spd 123 unit.wav --raw` dumps unit 123 at its stored pitch periods and native
+duration, without front-end pitch or time warping. The default mode can instead synthesize a unit at
+a chosen flat pitch and duration, which is useful for isolating encoding quality from join artifacts.
 
 ## Known gaps
 
