@@ -589,6 +589,7 @@ static void lpc_filter(sam_synth *s, const float *a, float *x, int n, float gain
 
 static void bigvgan_inspired_source(sam_synth *s, const float *src, int src_n, float *dst, int n, int period)
 {
+    const double voiced_level = 0.5;
     double weights[129], weight_sq = 0.0, source_sq = 0.0, output_sq = 0.0;
     double phase = s->vocoder_phase, step, source_rms, output_rms, normalization;
     int max_h, h, i;
@@ -629,7 +630,7 @@ static void bigvgan_inspired_source(sam_synth *s, const float *src, int src_n, f
     }
     output_rms = n > 0 ? sqrt(output_sq / n) : 0.0;
     if (output_rms > 0.0) {
-        double scale = source_rms / output_rms;
+        double scale = source_rms * voiced_level / output_rms;
         for (i = 0; i < n; i++) dst[i] = (float)(dst[i] * scale);
     }
     s->vocoder_phase = phase;
