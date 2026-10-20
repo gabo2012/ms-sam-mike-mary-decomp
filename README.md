@@ -108,9 +108,10 @@ Experiment knobs (not in the original engine):
 ### BigVGAN-inspired vocoder
 
 `--vocoder bigvgan-inspired` selects an optional native-C harmonic source/filter renderer.
-It builds a band-limited, phase-continuous harmonic excitation for voiced frames, blends in a
-small amount of the voice's recorded residual, and keeps the decoded LPC envelope and unvoiced
-noise. This mode needs no model files or runtime dependencies and is intended as an experimental,
+It builds a band-limited, phase-continuous harmonic excitation for voiced frames. The recorded
+residual sets excitation level only; its waveform is not mixed into the output. The decoded LPC
+envelope and unvoiced noise are retained. This mode needs no model files or runtime dependencies
+and is intended as an experimental,
 BigVGAN-inspired alternative; it is **not** the neural BigVGAN model and cannot reproduce its
 learned sound without trained weights. A gentle peak limiter keeps its output below full scale;
 the default `--vocoder sam` keeps the original renderer unchanged.
