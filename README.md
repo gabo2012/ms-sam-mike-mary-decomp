@@ -83,7 +83,8 @@ residual-excitation LPC synthesis), `--vocoder pulse` (generated glottal pulses 
 voiced residuals), `--vocoder bigvgan` (a lightweight DSP approximation using a phase-continuous,
 band-limited harmonic source), or `--vocoder spectral` (additive harmonic/noise synthesis from
 measured residual partials). The spectral mode uses independently weighted sinusoids for voiced
-frames and measured noise phases for unvoiced frames; it does not run an LPC time-domain filter.
+frames and passes decoded broadband excitation through for unvoiced frames, preserving consonant
+detail; it does not run an LPC time-domain filter.
 All modes use the same voice file, unit selection, pitch and duration contours. The `bigvgan` option
 directly synthesizes a phase-continuous harmonic waveform shaped by the voice's formant envelope,
 without applying the time-domain LPC filter. A gentle harmonic spectral tilt retains vowel

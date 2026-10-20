@@ -1070,7 +1070,10 @@ int sam_synth_segment(sam_synth *s, const sam_segment *g_in, sam_pcm_cb cb, void
                 for (i = 0; i < n; i++) dst[i] = (float)((double)dst[i] * s->p.gain);
             bigvgan_peak_control(s, dst, n);
         } else if (s->p.vocoder == SAM_VOCODER_SPECTRAL) {
-            spectral_render_frame(s, a, dst, n, s->p.gain, u.periods[f] > 0.0f);
+            if (u.periods[f] > 0.0f)
+                spectral_render_frame(s, a, dst, n, s->p.gain, 1);
+            else if (s->p.gain != 1.0f)
+                for (i = 0; i < n; i++) dst[i] = (float)((double)dst[i] * s->p.gain);
             bigvgan_peak_control(s, dst, n);
         } else {
             lpc_filter(s, a, dst, n, s->p.gain);
